@@ -8,6 +8,7 @@ public static class CreateJumpRopeScene
 {
     private const string Path = "Assets/0_0Scenes/TiraYAflojaPisoCompleto.unity";
     private const string WhitePath = "Assets/Art/Tira2D/FormaBlanca.png";
+    private const string BackgroundPath = "Assets/Art/Tira2D/FondoTiraYAfloja.png";
 
     [MenuItem("Tools/Upgrade Full Platform to Spinning Jump Rope")]
     public static void Create()
@@ -21,15 +22,14 @@ public static class CreateJumpRopeScene
         foreach (GameObject root in roots) Object.DestroyImmediate(root);
 
         Sprite white = AssetDatabase.LoadAssetAtPath<Sprite>(WhitePath);
+        Sprite background = LoadTugBackground();
         Sprite p1Sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/Tira2D/Player_Celeste.png");
         Sprite p2Sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/Tira2D/Equipo_Azul.png");
-        if (white == null || p1Sprite == null || p2Sprite == null)
+        if (white == null || background == null || p1Sprite == null || p2Sprite == null)
             throw new System.InvalidOperationException("Faltan sprites base en Assets/Art/Tira2D.");
 
         var arena = new GameObject("Reto de la cuerda giratoria");
-        Shape("Cielo de altura", white, Vector2.zero, new Vector2(52f, 31f), new Color(0.13f, 0.42f, 0.72f), arena.transform, -100);
-        for (int i = 0; i < 14; i++)
-            Shape("Nube", white, new Vector2(-24f + i * 3.8f, -7.5f + (i % 3) * 0.7f), new Vector2(4.5f, 1.05f), new Color(0.88f, 0.94f, 0.97f), arena.transform, -45);
+        Shape("Fondo del tira y afloja", background, Vector2.zero, new Vector2(52f, 31f), Color.white, arena.transform, -100);
         Shape("Plataforma flotante cerrada", white, new Vector2(0f, -0.25f), new Vector2(47f, 2f), new Color(0.17f, 0.22f, 0.3f), arena.transform, -20);
         Shape("Piso continuo", white, new Vector2(0f, 0.75f), new Vector2(46.8f, 0.25f), new Color(0.58f, 0.64f, 0.68f), arena.transform, -19);
         Shape("Borde dorado", white, new Vector2(0f, 0.92f), new Vector2(46.8f, 0.1f), new Color(0.95f, 0.73f, 0.35f), arena.transform, -18);
@@ -92,6 +92,20 @@ public static class CreateJumpRopeScene
         renderer.color = color;
         renderer.sortingOrder = 5;
         return go;
+    }
+
+    private static Sprite LoadTugBackground()
+    {
+        Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(BackgroundPath);
+        if (sprite != null) return sprite;
+        AssetDatabase.ImportAsset(BackgroundPath, ImportAssetOptions.ForceUpdate);
+        var importer = AssetImporter.GetAtPath(BackgroundPath) as TextureImporter;
+        importer.textureType = TextureImporterType.Sprite;
+        importer.spriteImportMode = SpriteImportMode.Single;
+        importer.filterMode = FilterMode.Point;
+        importer.textureCompression = TextureImporterCompression.Uncompressed;
+        importer.SaveAndReimport();
+        return AssetDatabase.LoadAssetAtPath<Sprite>(BackgroundPath);
     }
 
     private static GameObject Shape(string name, Sprite sprite, Vector2 pos, Vector2 size, Color color, Transform parent, int order)

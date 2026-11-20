@@ -17,7 +17,7 @@ public static class CreateTugOfWar2D
         EnsureFolder("Assets/Art", "Tira2D");
         EnsureFolder("Assets/0_2prefabs", "Tira2D");
         Sprite white = MakeWhiteSprite();
-        Sprite background = MakeSkySprite();
+        Sprite background = LoadTugBackground();
         Sprite playerSprite = MakePersonSprite("Player_Celeste.png", new Color32(44, 205, 241, 255));
         Sprite blueSprite = MakePersonSprite("Equipo_Azul.png", new Color32(47, 119, 232, 255));
         Sprite redSprite = MakePersonSprite("Equipo_Coral.png", new Color32(224, 72, 79, 255));
@@ -45,6 +45,11 @@ public static class CreateTugOfWar2D
 
     private static void BuildBackground(Transform parent, Sprite sky, Sprite white)
     {
+        if (sky != null)
+        {
+            SpriteObject("Fondo del tira y afloja", sky, new Vector3(0f, 2.5f, 10f), new Vector3(48f, 30f, 1f), Color.white, parent, -100);
+            return;
+        }
         SpriteObject("Cielo", sky, new Vector3(0f, 2.5f, 10f), new Vector3(48f, 30f, 1f), new Color(1f, 1f, 1f, 1f), parent, -100);
         Color cloud = new Color(1f, 1f, 1f, 0.74f);
         for (int row = 0; row < 3; row++)
@@ -66,6 +71,13 @@ public static class CreateTugOfWar2D
             for (int y = -9; y < -1; y += 2)
                 SpriteObject("Travesaño de torre", white, new Vector3(x, y, 3.8f), new Vector3(3.4f, 0.28f, 1f), new Color(0.34f, 0.4f, 0.5f), parent, -29);
         }
+    }
+
+    private static Sprite LoadTugBackground()
+    {
+        const string path = SpriteFolder + "/FondoTiraYAfloja.png";
+        if (!File.Exists(path)) return MakeSkySprite();
+        return ImportSprite(path, 100f);
     }
 
     private static void BuildPlatforms(Transform parent, Sprite white)

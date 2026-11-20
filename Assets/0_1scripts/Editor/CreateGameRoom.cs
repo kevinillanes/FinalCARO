@@ -22,6 +22,7 @@ public static class CreateGameRoom
         Material white = Mat("Assets/Art/Linea_Blanca_Sala.mat", new Color(0.96f, 0.96f, 0.9f));
         Material houseDoor = Mat("Assets/Art/Puerta_Casitas.mat", new Color(0.12f, 0.4f, 0.76f));
         Material houseWindow = Mat("Assets/Art/Ventana_Casitas.mat", new Color(0.24f, 0.82f, 0.91f));
+        Sprite roomBackdrop = LoadRoomBackdrop();
         Material playerColor = AssetDatabase.LoadAssetAtPath<Material>("Assets/Art/Player_Celeste.mat");
         if (playerColor == null) playerColor = Mat("Assets/Art/Player_Celeste.mat", new Color(0.05f, 0.82f, 1f));
         Material skin = AssetDatabase.LoadAssetAtPath<Material>("Assets/Art/Personaje_Piel.mat");
@@ -34,7 +35,7 @@ public static class CreateGameRoom
 
         Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var room = new GameObject("Sala cerrada del juego");
-        BuildRoomShell(room.transform, floor, blueCeiling, wallA, wallB, border, lamp);
+        BuildRoomShell(room.transform, floor, blueCeiling, wallA, wallB, border, lamp, roomBackdrop);
         BuildHouseArea(room.transform, houses, houseFloor, white);
         BuildGiantAndTrees(room.transform, npcPrefab, trees);
         GameObject player = CreatePlayer(room.transform, playerColor, skin);
@@ -48,7 +49,30 @@ public static class CreateGameRoom
         Debug.Log("CuartoDelJuego creado: sala cerrada, techo azul, casitas, línea, gigante y árboles.");
     }
 
-    private static void BuildRoomShell(Transform parent, Material floor, Material ceiling, Material wallA, Material wallB, Material trim, Material lamp)
+    [MenuItem("Tools/Apply Background to Existing Game Room")]
+    public static void ApplyBackdropToExistingRoom()
+    {
+        Scene scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+        GameObject room = GameObject.Find("Sala cerrada del juego");
+        if (room == null) throw new System.InvalidOperationException("No se encontró la sala cerrada del juego.");
+        Transform oldBackdrop = room.transform.Find("Fondo de los cuartos");
+        if (oldBackdrop != null) Object.DestroyImmediate(oldBackdrop.gameObject);
+        Sprite roomBackdrop = LoadRoomBackdrop();
+        if (roomBackdrop == null) throw new System.InvalidOperationException("No se pudo importar el fondo de los cuartos.");
+        var backdrop = new GameObject("Fondo de los cuartos");
+        backdrop.transform.SetParent(room.transform, false);
+        backdrop.transform.localPosition = new Vector3(0f, 12f, 64.35f);
+        backdrop.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        backdrop.transform.localScale = new Vector3(108f, 56f, 1f);
+        var renderer = backdrop.AddComponent<SpriteRenderer>();
+        renderer.sprite = roomBackdrop;
+        renderer.sortingOrder = -100;
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        AssetDatabase.SaveAssets();
+    }
+
+    private static void BuildRoomShell(Transform parent, Material floor, Material ceiling, Material wallA, Material wallB, Material trim, Material lamp, Sprite roomBackdrop)
     {
         Cube("Piso continuo", new Vector3(0f, -0.5f, 0f), new Vector3(110f, 1f, 130f), floor, parent);
         Cube("Muro este", new Vector3(55f, 12f, 0f), new Vector3(1f, 24f, 130f), wallA, parent);
@@ -73,6 +97,34 @@ public static class CreateGameRoom
         }
         Cube("Viga perimetral superior", new Vector3(0f, 22.8f, 0f), new Vector3(108f, 0.8f, 128f), trim, parent);
         Cube("Lámpara central", new Vector3(0f, 23.7f, 0f), new Vector3(25f, 0.16f, 4f), lamp, parent);
+        if (roomBackdrop != null)
+        {
+            var backdrop = new GameObject("Fondo de los cuartos");
+            backdrop.transform.SetParent(parent, false);
+            backdrop.transform.localPosition = new Vector3(0f, 12f, 64.35f);
+            backdrop.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            backdrop.transform.localScale = new Vector3(108f, 56f, 1f);
+            var renderer = backdrop.AddComponent<SpriteRenderer>();
+            renderer.sprite = roomBackdrop;
+            renderer.sortingOrder = -100;
+        }
+    }
+
+    private static Sprite LoadRoomBackdrop()
+    {
+        const string path = "Assets/Resources/Backgrounds/Fondo_Cuartos.png";
+        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+        var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+        bool changed = false;
+        if (importer.textureType != TextureImporterType.Sprite || importer.spriteImportMode != SpriteImportMode.Single)
+        {
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            changed = true;
+        }
+        if (importer.filterMode != FilterMode.Bilinear) { importer.filterMode = FilterMode.Bilinear; changed = true; }
+        if (changed) importer.SaveAndReimport();
+        return AssetDatabase.LoadAssetAtPath<Sprite>(path);
     }
 
     private static void BuildHouseArea(Transform parent, GameObject[] housePrefabs, Material area, Material line)
