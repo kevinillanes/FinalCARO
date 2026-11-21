@@ -4,10 +4,10 @@ using UnityEngine;
 /// <summary>Builds the campaign arenas as small, perspective 3D sets while keeping play on a readable plane.</summary>
 public sealed partial class CampaignStage25D : MonoBehaviour
 {
-    private const int Title = 0, Kidnap = 1, Round = 2, Result = 3, Insider = 4, Betrayal = 5, Ending = 6, GameOver = 7, Vote = 8, Interlude = 9;
+    private const int Title = 0, Kidnap = 1, Round = 2, Result = 3, Insider = 4, Betrayal = 5, Ending = 6, GameOver = 7, Vote = 8, Interlude = 9, Welcome = 11, Victory = 13;
     private const int RedLight = (int)PixelSurvivalGame.Trial.RedLight, Cookie = (int)PixelSurvivalGame.Trial.Cookie,
         Carousel = (int)PixelSurvivalGame.Trial.Carousel, Night = (int)PixelSurvivalGame.Trial.Night,
-        Tug = (int)PixelSurvivalGame.Trial.Tug, Bridge = (int)PixelSurvivalGame.Trial.Bridge, Final = (int)PixelSurvivalGame.Trial.Final;
+        Tug = (int)PixelSurvivalGame.Trial.Tug, Bridge = (int)PixelSurvivalGame.Trial.Bridge, Rope = (int)PixelSurvivalGame.Trial.Rope, Final = (int)PixelSurvivalGame.Trial.Final;
     private int rosterSlots = 31;
     private readonly List<GameObject> actors = new List<GameObject>();
     private Transform stageRoot;
@@ -24,6 +24,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
     private Renderer signalLamp;
     private GameObject leftTree,rightTree;
     private float tugEnd;
+    private bool[] tugAllies;
     public void SetFinishTrees(GameObject left,GameObject right){leftTree=left; rightTree=right;}
     private Vector3[] jumpStart, jumpEnd;
     private float[] jumpBlend;
@@ -96,6 +97,8 @@ public sealed partial class CampaignStage25D : MonoBehaviour
     private void OnDestroy()
     {
         if (carouselCanopy != null) Destroy(carouselCanopy);
+        if (vipSprite != null) Destroy(vipSprite);
+        if (bankGlass != null) Destroy(bankGlass);
         if (stageRoot != null) Destroy(stageRoot.gameObject);
         characterArt?.Dispose();
         Destroy(aggregate); Destroy(floorTiles); Destroy(trackSoil);
@@ -108,18 +111,20 @@ public sealed partial class CampaignStage25D : MonoBehaviour
 
     public void Present(int screen, int trial, int humanCount, float phase, float progress, float progress2, bool greenLight,
         int shotVictim, float jumpOne, float jumpTwo, bool movingOne, bool movingTwo, Vector2 playerOne, Vector2 playerTwo, Vector2[] bots,
-        bool[] playerAlive, bool[] botAlive, bool[] bridgeSide, bool[] nightHostile, bool[] knownGlass, bool[,] safeBridge)
+        bool[] playerAlive, bool[] botAlive, bool[] bridgeSide, bool[] nightHostile, bool[] knownGlass, bool[,] safeBridge, bool[] tugTeams)
     {
         trial = Mathf.Clamp(trial, 0, Final);
+        tugAllies=tugTeams;
+        bool rosterChanged=rosterSlots!=2+botAlive.Length;
         rosterSlots = 2 + botAlive.Length;
-        if (trial==lastTrial && IsTrialSet(screen) && IsTrialSet(lastScreen))
+        if (!rosterChanged && trial==lastTrial && IsTrialSet(screen) && IsTrialSet(lastScreen))
             lastScreen=screen;
-        else if (screen != lastScreen || trial != lastTrial)
+        else if (rosterChanged || screen != lastScreen || trial != lastTrial)
         {
-            if(trial==Tug)
+            if(trial==Tug && IsTrialSet(screen))
             {
                 int left=humanCount,right=0;
-                for(int i=0;i<botAlive.Length;i++) if(botAlive[i]) { if(i%2==0)left++;else right++; }
+                for(int i=0;i<botAlive.Length;i++) if(botAlive[i]) { if(tugAllies[i])left++;else right++; }
                 tugEnd=Mathf.Max(6.3f,2.1f+1.28f*(Mathf.Max(left,right)-1));
             }
             BuildStage(screen, trial);
@@ -143,7 +148,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         poses.Clear();
         signalLamp=null;
         cameraReady=false;
-        foreach (Transform child in stageRoot) Destroy(child.gameObject);
+        foreach (Transform child in stageRoot) { child.gameObject.SetActive(false); Destroy(child.gameObject); }
         actors.Clear(); bridgeLeft.Clear(); bridgeRight.Clear(); ropeMarker = doll = van = null; dollRenderer = null;
         shotTrail = tugRope = tugRopeFiberA = tugRopeFiberB = null;
         ArenaView.KeyLight(stageRoot);
@@ -151,10 +156,10 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         AddLight("Warm Fill", new Vector3(6f, 8f, 5f), .75f, 11f);
         if (screen == Kidnap) { BuildKidnap(); return; }
         if (screen == Round || screen == Interlude) BuildTrial(trial);
-        else if (screen == Vote) BuildDormitory();
+        else if (screen == Vote || screen == Welcome) { BuildDormitory(); if (screen == Welcome) BuildWelcome(); }
         else if (screen == Insider || screen == Betrayal) BuildNarrativeRoom(screen);
         else if (screen == Result || screen == GameOver) BuildTrial(trial);
-        else if (screen == Ending) BuildFinal();
+        else if (screen == Victory || screen == Ending) BuildWinnerExit();
         else BuildLobby();
 
     }
@@ -169,6 +174,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
             case Night: BuildDormitory(); break;
             case Tug: BuildTug(); break;
             case Bridge: BuildBridge(); break;
+            case Rope: BuildSwingDeck(); break;
             default: BuildFinal(); break;
         }
     }
@@ -264,7 +270,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         sceneCamera.backgroundColor = new Color(.012f, .018f, .055f);
         Box("Bridge Departure",new Vector3(0,2.4f,-8.05f),new Vector3(5,.3f,2.1f),floorMat);
         Box("Bridge Void Base", new Vector3(0f, -5f, 3f), new Vector3(22f, .4f, 30f), darkMat);
-        Box("Desembarco",new Vector3(0,2.4f,10.0f),new Vector3(5,.4f,4),floorMat);
+        Box("Desembarco",new Vector3(0,2.4f,11.45f),new Vector3(5,.4f,4),floorMat);
         for(int lane=-1;lane<=1;lane+=2)
             Box("Viga longitudinal",new Vector3(lane*2.12f,2.15f,1.1f),new Vector3(.16f,.18f,20),goldMat);
         for (int side = -1; side <= 1; side += 2)
@@ -283,9 +289,9 @@ public sealed partial class CampaignStage25D : MonoBehaviour
     private void BuildCookieRoom()
     {
         BuildNarrativeRoom(Round);
-        for (int row = 0; row < 4; row++)
+        for (int row=0; row<(rosterSlots+7)/8; row++)
         {
-            float z = -4.8f + row * 3.1f;
+            float z=-8f+row*2.38f;
             Box("Mesa de azúcar", new Vector3(0,.65f,z), new Vector3(15,.35f,1.4f), woodMat);
             for (int seat = 0; seat < 8; seat++)
                 Cylinder("Lata de galleta", new Vector3(-6.3f + seat*1.8f,.88f,z), .4f,.1f,goldMat);
@@ -313,24 +319,6 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         for(int i=0;i<rosterSlots;i++) actors.Add(Actor(false));
     }
 
-    private void BuildFinal()
-    {
-        sceneCamera.backgroundColor = new Color(.13f, .19f, .28f);
-        Box("Final Arena Floor", new Vector3(0f, -.3f, 1f), new Vector3(21f, .6f, 24f), floorMat);
-        for (int i = 0; i < 9; i++)
-        {
-            float x = -9.5f + i * 2.375f;
-            Box("Arena Wall Section", new Vector3(x, 2.9f, 10.3f), new Vector3(2.3f, 6f, .5f), i % 2 == 0 ? wallMat : darkMat);
-            Box("Arena Banner", new Vector3(x, 5.5f, 10f), new Vector3(1.3f, .15f, .2f), i % 2 == 0 ? pinkMat : blueMat);
-        }
-        Box("Goal Gate", new Vector3(8f, 2.7f, -6.5f), new Vector3(.32f, 5.4f, .4f), goldMat);
-        Box("Meta",new Vector3(7.36f,.055f,.1f),new Vector3(.25f,.065f,15.6f),goldMat);
-        Box("Pasarela de salida",new Vector3(9.3f,.035f,.2f),new Vector3(3,.065f,16),woodMat);
-        for(int lane=0;lane<5;lane++)
-            Box("Banda de salida",new Vector3(-3,.025f,-6+lane*3),new Vector3(7,.02f,.09f),whiteMat);
-        for (int i = 0; i < rosterSlots; i++) actors.Add(Actor(false));
-    }
-
     private void BuildNarrativeRoom(int screen)
     {
         sceneCamera.backgroundColor = new Color(.018f, .024f, .05f);
@@ -348,7 +336,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         int shotVictim, float jumpOne, float jumpTwo, bool movingOne, bool movingTwo, Vector2 playerOne, Vector2 playerTwo, Vector2[] bots,
         bool[] playerAlive, bool[] botAlive, bool[] bridgeSide, bool[] nightHostile, bool[] knownGlass, bool[,] safeBridge)
     {
-        if (HasCarousel) return;
+        if (HasCarousel || screen==Victory || screen==Ending) return;
         if (screen == Kidnap && van != null)
         {
             van.transform.position = new Vector3(Mathf.Lerp(-9f, 0f, Mathf.Clamp01(phase / 5f)), 0f, 2f);
@@ -374,7 +362,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
                 int botIndex = i - 2;
                 float botProgress = bots != null && botIndex < bots.Length ? bots[botIndex].x : 0f;
                 float x = RedLightBotLane(botIndex);
-                float z = Mathf.Lerp(-12f - (botIndex / 8)*1.4f,31f,botProgress/760f);
+                float z = Mathf.Lerp(-12f - (botIndex / 8)*1.0f,31f,botProgress/760f);
                 PlaceActor(actors[i], new Vector3(x, .05f, z), false, greenLight, 0f, IsAlive(botAlive, botIndex),true);
             }
             for (int i = rosterSlots; i < actors.Count; i++) PlaceActor(actors[i], new Vector3(-5f + (i - rosterSlots) * 5f, .05f, 29.5f), true, shotVictim >= 0, 0f);
@@ -410,7 +398,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
             for (int i = 0; i < rosterSlots; i++)
             {
                 int seat = i < 2 ? i + 3 : i < 5 ? i - 2 : i;
-                Vector3 position = new Vector3(-6.3f + seat%8*1.8f,.05f,-3.8f + seat/8*3.1f);
+                Vector3 position = new Vector3(-6.3f + seat%8*1.8f,.05f,-7.15f + seat/8*2.38f);
                 PlaceActor(actors[i], position, false, false, 0, i < 2 ? i < humanCount : IsAlive(botAlive,i-2));
             }
             PlaceActor(actors[rosterSlots], new Vector3(-8.2f,.05f,0), true, false, 0);
@@ -430,7 +418,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
             int leftRank=0,rightRank=0;
             for (int i = 0; i < actors.Count; i++)
             {
-                bool left=i<2 || i%2==0;
+                bool left=i<2 || tugAllies[i-2];
                 if(i<2?i>=humanCount:!IsAlive(botAlive,i-2)){actors[i].SetActive(false);continue;}
                 int rank=left?leftRank++:rightRank++;
                 float effort=Mathf.Sin(animClock*5.5f-rank*.12f);
@@ -462,23 +450,10 @@ public sealed partial class CampaignStage25D : MonoBehaviour
                 PlaceActor(actors[i],feet,false,t<1,0f,i<2?i<humanCount:IsAlive(botAlive,i-2));
             }
         }
-        else if ((screen == Round || screen == Result || screen == GameOver || screen == Ending) && trial == Final)
+        else if ((trial == Final || trial == Rope) && (IsTrialSet(screen) || screen==Ending)) return;
+        else if (screen == Vote || screen == Welcome)
         {
-            float leapOne = jumpOne > 0f ? Mathf.Sin(Mathf.Clamp01(1f - jumpOne / .58f) * Mathf.PI) * 1.25f : 0f;
-            float leapTwo = jumpTwo > 0f ? Mathf.Sin(Mathf.Clamp01(1f - jumpTwo / .58f) * Mathf.PI) * 1.25f : 0f;
-            if (actors.Count > 0) PlaceActor(actors[0], new Vector3(Mathf.Clamp(playerOne.x / 55f, -8.3f, 8.1f), .05f + leapOne, Mathf.Clamp(playerOne.y / 26f, -6.75f, 6.75f)), false, movingOne, 0f, IsAlive(playerAlive, 0), true);
-            if (actors.Count > 1) PlaceActor(actors[1], new Vector3(Mathf.Clamp(playerTwo.x / 55f, -8.3f, 8.1f), .05f + leapTwo, Mathf.Clamp(playerTwo.y / 26f, -6.75f, 6.75f)), false, movingTwo, 0f, IsAlive(playerAlive, 1), true);
-            if (humanCount < 2 && actors.Count > 1) actors[1].SetActive(false);
-            actors[0].GetComponent<SpriteRenderer>().color = IsAlive(playerAlive,0)?new Color(.76f,1f,1f):Color.gray;
-            for (int i = 2; i < actors.Count; i++)
-            {
-                Vector2 pos = bots != null && bots.Length > 0 ? bots[(i - 2) % bots.Length] : Vector2.zero;
-                PlaceActor(actors[i], new Vector3(Mathf.Clamp(pos.x / 55f, -8.3f, 8.1f), .05f, Mathf.Clamp(pos.y / 26f, -6.75f, 6.75f)), false, true, 0f, IsAlive(botAlive,i-2));
-            }
-        }
-        else if (screen == Vote)
-        {
-            for(int i=0;i<actors.Count;i++) PlaceActor(actors[i],new Vector3(-6f+(i%8)*1.7f,.05f,-4f+(i/8)*2.3f),false,false,0,i<2?i<humanCount:IsAlive(botAlive,i-2));
+            for(int i=0;i<actors.Count;i++) PlaceActor(actors[i],new Vector3(-6f+(i%8)*1.7f,.05f,-6f+(i/8)*1.9f),false,false,0,i<2?i<humanCount:IsAlive(botAlive,i-2));
         }
         else if (screen != Round)
         {
@@ -550,7 +525,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
             pose=new ArenaCharacterPose();
             poses.Add(actor,pose);
         }
-        float floor=lastTrial==Final?.05f:lastTrial==Bridge?2.57f:position.y;
+        float floor=lastTrial==Final?.05f:lastTrial==Rope?.94f:lastTrial==Bridge?2.57f:position.y;
         pose.Draw(actor.transform,position,floor,alive,walking,guard,yaw,Time.deltaTime,characterArt,playerSprite,playerWalkA,playerWalkB,armedGuardSprite);
     }
 

@@ -4,19 +4,19 @@ using UnityEngine.InputSystem;
 /// <summary>A small, self-contained pixel survival game with local co-op and bot rivals.</summary>
 public sealed partial class PixelSurvivalGame : MonoBehaviour
 {
-    private enum Screen { Title, Kidnap, Round, Result, Insider, Betrayal, Ending, GameOver, Vote, Interlude, Exit }
-    internal enum Trial { RedLight, Cookie, Carousel, Night, Tug, Bridge, Final }
+    private enum Screen { Title, Kidnap, Round, Result, Insider, Betrayal, Ending, GameOver, Vote, Interlude, Exit, Welcome, Practice, Victory }
+    internal enum Trial { RedLight, Cookie, Carousel, Night, Tug, Bridge, Rope, Final }
 
     private static readonly string[] TrialNames =
     {
-        "LUZ ROJA, LUZ VERDE", "LA GALLETA", "EL CARRUSEL", "NOCHE EN LAS LITERAS", "TIRA Y AFLOJA", "EL PUENTE DE CRISTAL", "EL JUEGO FINAL"
+        "LUZ ROJA, LUZ VERDE", "LA GALLETA", "EL CARRUSEL", "NOCHE EN LAS LITERAS", "TIRA Y AFLOJA", "EL PUENTE DE CRISTAL", "LA CUERDA GIRATORIA", "EL SUELO QUE CAE"
     };
     private static readonly string[] StoryCards =
     {
         "Nerea: «Guarda el número de tu tarjeta. Aquí hasta tu nombre tiene precio».",
         "El vehículo se detiene. Los guardias te llevan a una arena desconocida.",
-        "Despiertas junto a otros participantes. Los guardias anuncian la primera prueba.",
-        "Guardia: «Al regresar podrán votar. Cada uniforme que vuelva tendrá una voz»."
+        "Al otro lado del cristal pasan luces blancas. El vehículo empieza a frenar.",
+        "Dos guardias abren las puertas. Al fondo del pasillo se oye un altavoz."
     };
     private int rivalBots;
     private Screen screen = Screen.Title;
@@ -127,33 +127,51 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         int shotVictim = shotTarget >= 0 ? shotTarget : shotBotTarget >= 0 ? shotBotTarget + 2 : -1;
         stage25D.Present((int)screen, trialIndex, humanCount, screen == Screen.Round ? trialTime : phaseTime, stageProgress, stageProgress2, lightsGreen,
             shotVictim, jumpTimer[0], jumpTimer[1], playerMoving[0], playerMoving[1], visualPlayerOne, visualPlayerTwo, botPosition,
-            playerAlive, botRunnerAlive, bridgeRight, nightHostile, knownGlass, safeBridge);
+            playerAlive, botRunnerAlive, bridgeRight, nightHostile, knownGlass, safeBridge, tugAllies);
         if ((Trial)trialIndex == Trial.Carousel && stage25D.HasCarousel)
-            stage25D.ShowCarousel(carouselAngle, carouselRoom, roomCount, groupSize, humanCount,
+            stage25D.ShowCarousel(carouselAngle, carouselRoom, roomCount, capacity, humanCount,
                 finalPosition, botPosition, botRunnerAlive, carouselPhase == CarouselPhase.Doors, playerMoving);
+        if (screen == Screen.Round || screen == Screen.Interlude || screen == Screen.GameOver || screen == Screen.Result)
+        {
+            if ((Trial)trialIndex == Trial.Rope) stage25D.ShowRopeRound(ropePhase, ropeSlots, humanCount, playerAlive, botRunnerAlive);
+            if ((Trial)trialIndex == Trial.Final) stage25D.ShowFloor(floorRiders, tileDeadline, trialTime, humanCount, playerAlive, botRunnerAlive);
+            if ((Trial)trialIndex == Trial.Bridge) stage25D.ShowGlassFalls(bridgeFallAt, trialTime);
+        }
+        if(screen==Screen.Victory || screen==Screen.Ending) stage25D.ShowWinners(screen==Screen.Ending ? 9f : phaseTime,playerWon,humanCount);
         stage25D.RevealContestants(humanCount);
     }
 
     private void Update()
     {
         float dt = Time.deltaTime;
+        if(screen==Screen.Victory)
+        {
+            phaseTime+=dt;
+            if(phaseTime>=9f || (phaseTime>1.5f && Keyboard.current?.spaceKey.wasPressedThisFrame==true)) screen=Screen.Ending;
+            return;
+        }
         if (screen == Screen.Interlude)
         {
             phaseTime += dt;
             if (phaseTime >= 6f || (phaseTime > .5f && Keyboard.current?.spaceKey.wasPressedThisFrame == true)) { screen = Screen.Round; phaseTime = 0f; }
             return;
         }
-        if (screen == Screen.Kidnap)
+        if (screen == Screen.Kidnap || screen == Screen.Welcome)
         {
             phaseTime += dt;
             Keyboard cutsceneKeys = Keyboard.current;
-            if (phaseTime >= 12f || (cutsceneKeys != null && cutsceneKeys.spaceKey.wasPressedThisFrame)) BeginTrial(0);
+            float duration = screen == Screen.Welcome ? 16f : 12f;
+            if (phaseTime >= duration || (phaseTime > .5f && cutsceneKeys?.spaceKey.wasPressedThisFrame == true))
+            {
+                if (screen == Screen.Welcome) BeginTrial(0);
+                else { screen = Screen.Welcome; phaseTime = 0f; }
+            }
             return;
         }
         if (screen == Screen.Betrayal)
         {
             phaseTime += dt;
-            if (phaseTime >= 6f) BeginTrial((int)Trial.Final);
+            if (phaseTime >= 6f) Advance();
             return;
         }
         if (screen == Screen.GameOver)
@@ -174,7 +192,8 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
             case Trial.Night: UpdateNight(keys, dt); break;
             case Trial.Tug: UpdateTug(keys, dt); break;
             case Trial.Bridge: UpdateBridge(keys); break;
-            case Trial.Final: UpdateFinal(keys, dt); break;
+            case Trial.Rope: UpdateRopeRound(keys, dt); break;
+            case Trial.Final: UpdateFloor(keys, dt); break;
         }
     }
 
@@ -259,26 +278,6 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         runner[p] = Mathf.Clamp(runner[p] + axis * 96f * dt, 0f, 760f);
     }
 
-    private void UpdateTug(Keyboard k, float dt)
-    {
-        int pulls = 0;
-        if (Pressed(k, Key.Space) || Pressed(k, Key.A)) pulls++;
-        if (humanCount == 2 && (Pressed(k, Key.Enter) || Pressed(k, Key.RightArrow))) pulls++;
-        float teamPull = 0f;
-        for (int i=0;i<rivalBots;i++)
-        {
-            if (!botRunnerAlive[i] || (botClock[i] -= dt) > 0) continue;
-            teamPull += (i%2==0 ? 1f : -1f)*(.3f + .45f*nerve[i]);
-            botClock[i] = 1.4f + (1f-craft[i])*.8f;
-        }
-        if (pulls > 0) Chime(.7f);
-        tugProgress += teamPull + pulls * 3.1f;
-        tugProgress -= (0.52f + Mathf.Min(0.4f, trialTime * 0.005f)) * dt;
-        tugProgress = Mathf.Clamp(tugProgress, 0f, 100f);
-        if (tugProgress >= 100f) CompleteTrial(true, "¡Tu equipo ganó el tira y afloja!");
-        else if (trialTime >= 32f) CompleteTrial(tugProgress >= 46f, tugProgress >= 46f ? "El equipo aguantó unido." : "El equipo rival ganó terreno.");
-    }
-
     private void UpdateBridge(Keyboard k)
     {
         if (Pressed(k, Key.A) || (humanCount == 1 && Pressed(k, Key.LeftArrow))) ChooseBridge(0, false);
@@ -288,18 +287,26 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
             if (Pressed(k, Key.LeftArrow)) ChooseBridge(1, false);
             if (Pressed(k, Key.RightArrow)) ChooseBridge(1, true);
         }
+        bool humansAcross=bridgeStep[0]>=8 && (humanCount==1 || bridgeStep[1]>=8);
+        bool botsCrossing=false;
         for (int i=0;i<rivalBots;i++)
         {
             int step=botStep[i];
-            if (!botRunnerAlive[i] || step>=8 || (botClock[i]-=Time.deltaTime)>0) continue;
-            bool safe = knownGlass[step] || Random.value < .45f+.35f*craft[i];
+            if (!botRunnerAlive[i] || step>=8) continue;
+            if (trialTime>=65f) { botRunnerAlive[i]=false; continue; }
+            botsCrossing=true;
+            if ((botClock[i]-=Time.deltaTime*(humansAcross?2.6f:1f))>0) continue;
+            bool right = knownGlass[step] && Random.value < .82f + .15f*craft[i]
+                ? safeBridge[step,1] : Random.value < .5f;
+            bool safe = safeBridge[step,right ? 1 : 0];
             knownGlass[step]=true;
             if (!safe) botRunnerAlive[i]=false;
             else botStep[i]++;
-            botPosition[i]=new Vector2(botStep[i],safeBridge[step,1]?1:0);
+            botPosition[i]=new Vector2(step+1,right?1:0);
+            if (!safe) { bridgeFallAt[i]=trialTime; Chime(.6f); }
             botClock[i]=1.8f+2f*(1f-nerve[i]);
         }
-        if (bridgeStep[0] >= 8 && (humanCount == 1 || bridgeStep[1] >= 8)) CompleteTrial(true, "Cruzaron el puente.");
+        if (humansAcross && !botsCrossing) CompleteTrial(true, "El recuento terminó. Los supervivientes cruzaron el puente.");
         else if (bridgeMistakes[0] >= 3 || (humanCount == 2 && bridgeMistakes[1] >= 3)) CompleteTrial(false, "Demasiados paneles se rompieron.");
         else if (trialTime > 65f) CompleteTrial(false, "El puente se cerró.");
     }
@@ -310,54 +317,6 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         knownGlass[bridgeStep[p]] = true;
         if (safeBridge[bridgeStep[p], right ? 1 : 0]) { bridgeRight[p]=right; bridgeStep[p]++; Chime(1.3f); }
         else { bridgeMistakes[p]++; Chime(.58f); }
-    }
-
-    private void UpdateFinal(Keyboard k, float dt)
-    {
-        playerMoving[0] = playerMoving[1] = false;
-        MoveFinal(k, 0, Key.W, Key.A, Key.S, Key.D, dt);
-        if (humanCount == 2) MoveFinal(k, 1, Key.UpArrow, Key.LeftArrow, Key.DownArrow, Key.RightArrow, dt);
-        if (Pressed(k, Key.Space) && jumpTimer[0]<=0f) jumpTimer[0] = 0.58f;
-        if (humanCount == 2 && Pressed(k, Key.Enter) && jumpTimer[1]<=0f) jumpTimer[1] = 0.58f;
-        for (int p = 0; p < jumpTimer.Length; p++) jumpTimer[p] = Mathf.Max(0f, jumpTimer[p] - dt);
-        for (int i = 0; i < botPosition.Length; i++)
-        {
-            if (!botRunnerAlive[i]) continue;
-            int p = i % humanCount;
-            if (!playerAlive[p] && humanCount == 2) p = 1 - p;
-            Vector2 target = finalPosition[p];
-            Vector2 direction = (target - botPosition[i]).normalized;
-            float betrayalBoost = insiderBetrayed ? 1.45f : 1f;
-            botPosition[i] += direction * (18f + (i % 3) * 3f) * betrayalBoost * dt;
-        }
-        for (int p = 0; p < humanCount; p++)
-        {
-            if (finalPosition[p].x >= 405f) playerWon[p] = true;
-            for (int b = 0; b < botPosition.Length; b++)
-                if (playerAlive[p] && !playerWon[p] && jumpTimer[p] < .08f && botRunnerAlive[b] && Vector2.Distance(finalPosition[p], botPosition[b]) < 22f)
-                {
-                    playerAlive[p] = false;
-                    killedPlayer = p;
-
-                }
-        }
-        bool allWon = playerWon[0] && (humanCount == 1 || playerWon[1]);
-        bool allLost = !playerAlive[0] && (humanCount == 1 || !playerAlive[1]);
-        bool teamFinished = humanCount == 2 && (playerWon[0] || !playerAlive[0]) && (playerWon[1] || !playerAlive[1]);
-        if (allWon || (teamFinished && !allLost)) CompleteTrial(true, "¡Ganaste el juego final!");
-        else if (allLost) CompleteTrial(false, "Los rivales llegaron primero.");
-        else if (trialTime > 50f) CompleteTrial(playerWon[0] || (humanCount == 2 && playerWon[1]), "El portón de salida se cerró.");
-    }
-
-    private void MoveFinal(Keyboard k, int p, Key up, Key left, Key down, Key right, float dt)
-    {
-        if (!playerAlive[p] || playerWon[p]) return;
-        Vector2 move = new Vector2((k[right].isPressed ? 1f : 0f) - (k[left].isPressed ? 1f : 0f),
-            (k[up].isPressed ? 1f : 0f) - (k[down].isPressed ? 1f : 0f));
-        move=ArenaView.GroundInput(move);
-        playerMoving[p] = move.sqrMagnitude > 0.01f;
-        finalPosition[p] += new Vector2(move.x,move.y*26f/55f) * 139f * dt;
-        finalPosition[p] = new Vector2(Mathf.Clamp(finalPosition[p].x, -440f, 430f), Mathf.Clamp(finalPosition[p].y, -175f, 175f));
     }
 
     private void StartKidnap()
@@ -388,7 +347,7 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         jumpTimer = new float[2];
 
         playerMoving = new bool[2];
-        tugProgress = 15f;
+        tugProgress = 42f;
         bridgeRight[0] = false; bridgeRight[1] = true;
         bridgeStep = new int[2]; bridgeMistakes = new int[2];
         for (int i = 0; i < 8; i++)
@@ -398,19 +357,19 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
             safeBridge[i, 1] = safeRight;
         }
         insiderRouteRevealed = index == (int)Trial.Bridge && insiderTrusted;
-        finalPosition = new[] { new Vector2(-420f, 0f), new Vector2(-420f, -45f) };
+        finalPosition = new Vector2[2];
         botPosition = new Vector2[rivalBots];
-        for (int i = 0; i < botPosition.Length; i++)
-        {
-            float x = trialIndex == (int)Trial.Final ? 25f + (i % 4) * 90f : Random.Range(0f, 6f);
-            float y = trialIndex == (int)Trial.Final ? Random.Range(-155f, 155f) : 0f;
-            botPosition[i] = trialIndex == (int)Trial.Bridge ? Vector2.zero : new Vector2(x, y);
-        }
-        playerAlive = new[] { true, true };
+        if ((Trial)index == Trial.RedLight)
+            for (int i=0;i<rivalBots;i++) botPosition[i].x=Random.Range(0f,6f);
+        if ((Trial)index != Trial.Final) playerAlive = new[] { true, humanCount == 2 };
         playerWon = new bool[2];
         lightsGreen = true; lightClock = 0f;
         redHeld[0] = redHeld[1] = false;
         PrepareContest();
+        bridgeFallAt = new float[rivalBots];
+        System.Array.Fill(bridgeFallAt, float.NegativeInfinity);
+        if ((Trial)index == Trial.Rope) PrepareRopeRound();
+        if ((Trial)index == Trial.Final) PrepareFloor();
         if ((Trial)index == Trial.Carousel) PrepareCarousel();
     }
 
@@ -422,12 +381,14 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         resultMessage = message;
         if (success) ResolveRoster();
         screen = success
-            ? trialIndex == (int)Trial.Final ? Screen.Ending
+            ? isPractice ? Screen.Result
+            : trialIndex == (int)Trial.Final ? Screen.Victory
             : trialIndex == (int)Trial.RedLight ? Screen.Vote
             : trialIndex == (int)Trial.Tug ? Screen.Insider
             : trialIndex == (int)Trial.Bridge ? Screen.Betrayal
             : Screen.Result
             : Screen.GameOver;
+        if(screen==Screen.Victory) phaseTime=0;
         if (screen == Screen.Betrayal)
         {
             insiderBetrayed = insiderTrusted;
@@ -445,6 +406,7 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
 
     private void StartGame(int players)
     {
+        isPractice = false;
         humanCount = players;
         trialIndex = 0;
         CreateRoster();
@@ -488,6 +450,9 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         GUI.backgroundColor = new Color(0.78f, 0.16f, 0.34f);
         if (screen == Screen.Title) DrawTitle();
         else if (screen == Screen.Kidnap) DrawKidnap();
+        else if (screen == Screen.Welcome) DrawWelcome();
+        else if (screen == Screen.Victory) DrawVictory();
+        else if (screen == Screen.Practice) DrawPracticeEntry();
         else if (screen == Screen.Round) DrawRound();
         else if (screen == Screen.Result) DrawResult();
         else if (screen == Screen.Insider) DrawInsider();
@@ -512,16 +477,16 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         Fill(new Rect(28,36,381,465),new Color(.035f,.058f,.085f,.96f));
         Fill(new Rect(28,36,381,5),new Color(.98f,.67f,.27f));
         Label(new Rect(36,68,365,61),"LA ÚLTIMA RONDA",titleStyle);
-        Label(new Rect(43,129,352,45),"30 participantes  ·  7 pruebas",bodyStyle);
+        Label(new Rect(43,129,352,45),$"{CampaignBots} rivales  ·  {TrialNames.Length} pruebas",bodyStyle);
         if (GUI.Button(new Rect(55,193,327,48),"CAMPAÑA INDIVIDUAL",buttonStyle)) StartGame(1);
         if (GUI.Button(new Rect(55,251,327,48),"COOPERATIVO LOCAL",buttonStyle)) StartGame(2);
         Label(new Rect(46,302,347,37),"J1 · WASD      J2 · FLECHAS",smallStyle);
         Fill(new Rect(55,353,327,1),new Color(.34f,.44f,.47f));
         Label(new Rect(53,361,329,28),"PRACTICAR",smallStyle);
         if (GUI.Button(new Rect(55,397,327,36),"Tira y afloja",buttonStyle))
-            UnityEngine.SceneManagement.SceneManager.LoadScene("TiraYAflojaAlturas");
+            OpenTugPractice();
         if (GUI.Button(new Rect(55,442,327,36),"Saltar la cuerda",buttonStyle))
-            UnityEngine.SceneManagement.SceneManager.LoadScene("TiraYAflojaPisoCompleto");
+            OpenRopePractice();
     }
 
     private void DrawKidnap()
@@ -548,7 +513,8 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
             case Trial.Night: DrawNight(); break;
             case Trial.Tug: DrawTug(); break;
             case Trial.Bridge: DrawBridge(); break;
-            case Trial.Final: DrawFinal(); break;
+            case Trial.Rope: DrawRopeRound(); break;
+            case Trial.Final: DrawFloor(); break;
         }
         if (trialIndex == (int)Trial.Bridge) DrawBridgeHint();
         Label(new Rect(25, 500, 910, 24), humanCount == 2 ? "COOPERATIVO LOCAL   ·   J1 y J2 comparten el resultado" : "CAMPAÑA INDIVIDUAL", smallStyle);
@@ -566,40 +532,22 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         Fill(new Rect(704, 466, 212f * Mathf.Clamp01(runner[0] / 760f), 8), new Color(0.35f, 0.86f, 0.69f));
     }
 
-    private void DrawTug()
-    {
-        Fill(new Rect(150, 435, 660, 28), new Color(0.07f, 0.08f, 0.12f));
-        Fill(new Rect(154, 439, tugProgress * 6.52f, 20), new Color(0.24f, 0.77f, 0.56f));
-        Fill(new Rect(150,388,660,43),new Color(.04f,.065f,.10f,.9f));
-        Label(new Rect(154,389,652,42),humanCount==1
-            ?"Pulsa ESPACIO o A para tirar. Alcanza el 100 % o termina con al menos 46 %."
-            :"Pulsen para tirar: J1 ESPACIO/A · J2 ENTER/→. Alcancen 100 % o terminen con 46 %.",smallStyle);
-        Label(new Rect(340, 465, 280, 25), "FUERZA " + Mathf.RoundToInt(tugProgress) + "%", smallStyle);
-    }
-
     private void DrawBridge()
     {
-        Fill(new Rect(150, 115, 660, 56), new Color(0.035f, 0.055f, 0.12f, 0.7f));
-        Label(new Rect(160, 120, 640, 46), humanCount == 1
-            ? "Elige un panel por paso: A/← izquierda o D/→ derecha.\nTres errores te eliminan. Sigue la pista de Nerea si la tienes."
-            : "Elijan un panel por paso. P1: A/D  ·  P2: ←/→\nTres errores eliminan al jugador. Usen la pista de Nerea.", smallStyle);
-        Label(new Rect(180, 179, 600, 30), "P1 paso " + bridgeStep[0] + "/8  ·  errores " + bridgeMistakes[0] + "/3" + (humanCount == 2 ? "   P2 paso " + bridgeStep[1] + "/8  ·  errores " + bridgeMistakes[1] + "/3" : ""), smallStyle);
+        Fill(new Rect(66,396,828,101),new Color(.03f,.05f,.10f,.93f));
+        string hint=bridgeStep[0]>=8 && (humanCount==1 || bridgeStep[1]>=8) ? "Ya cruzaron. Los últimos rivales están saltando."
+            : humanCount==1 ? "A / ← izquierda   ·   D / → derecha   ·   Tres errores te eliminan."
+            : "J1 A/D   ·   J2 ←/→   ·   Elijan un cristal por fila. Tres errores eliminan.";
+        Label(new Rect(74,399,812,29),hint,smallStyle);
+        Label(new Rect(74,430,812,26),$"J1 · Paso {bridgeStep[0]}/8 · Errores {bridgeMistakes[0]}/3"+
+            (humanCount==2?$"      J2 · Paso {bridgeStep[1]}/8 · Errores {bridgeMistakes[1]}/3":""),smallStyle);
     }
 
     private void DrawBridgeHint()
     {
         string route = insiderRouteRevealed ? "PISTA DE NEREA: " : "PASOS OBSERVADOS: ";
         for (int i = 0; i < 8; i++) route += !insiderRouteRevealed && !knownGlass[i] ? "·   " : safeBridge[i, 1] ? "D  " : "I  ";
-        Label(new Rect(250, 218, 460, 28), route, smallStyle);
-    }
-
-    private void DrawFinal()
-    {
-        Fill(new Rect(770, 210, 160, 12), new Color(0.04f, 0.07f, 0.1f, 0.82f));
-        Fill(new Rect(774, 214, 152f * Mathf.Clamp01((finalPosition[0].x + 440f) / 845f), 4), Color.yellow);
-        Label(new Rect(110, 130, 740, 52), "Llega al otro lado y evita a los rivales", bodyStyle);
-        Label(new Rect(150, 190, 660, 35), humanCount == 1 ? "P1 WASD  ·  ESPACIO para saltar" : "P1 WASD/ESPACIO  ·  P2 FLECHAS/ENTER para saltar", smallStyle);
-        Label(new Rect(150, 425, 660, 28), "META ↗  ·  Cruza la franja dorada", smallStyle);
+        Label(new Rect(110,461,740,28), route, smallStyle);
     }
 
     private void DrawResult()
@@ -620,7 +568,11 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
             else if (GUI.Button(new Rect(500,365,275,55),"GUARDAR RACIÓN",buttonStyle)) Advance();
             return;
         }
-        if (GUI.Button(new Rect(350, 365, 260, 55), "SIGUIENTE PRUEBA", buttonStyle)) Advance();
+        if (GUI.Button(new Rect(350, 365, 260, 55), isPractice ? "VOLVER AL MENÚ" : "SIGUIENTE PRUEBA", buttonStyle))
+        {
+            if (isPractice) screen = Screen.Title;
+            else Advance();
+        }
     }
 
     private void DrawInsider()
@@ -642,8 +594,8 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         Fill(new Rect(0, 365, 960, 175), new Color(0.11f, 0.13f, 0.19f, 0.5f));
         Fill(new Rect(70, 70, 820, 116), new Color(0f, 0f, 0f, 0.72f));
         string text = insiderBetrayed
-            ? "Nerea pulsa la alarma. «Te di ocho pasos seguros para que llegaras hasta mi cámara». Los rivales oyen tu posición."
-            : "La infiltrada se queda atrás para distraer a los guardias. La puerta del juego final se abre.";
+            ? "Nerea pulsa la alarma. «Te di ocho pasos seguros para que llegaras hasta mi cámara». Los VIP ya te esperan al otro lado de la cuerda."
+            : "La infiltrada se queda atrás para distraer a los guardias. Dos muñecas esperan en los extremos de la pasarela.";
         Label(new Rect(110, 84, 740, 90), text, bodyStyle);
         Label(new Rect(335, 475, 290, 28), "SIGUIENTE PRUEBA EN " + Mathf.CeilToInt(6f - phaseTime), smallStyle);
     }
@@ -664,7 +616,7 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         Fill(new Rect(0, 0, 960, 540), new Color(0.035f, 0.06f, 0.11f, 0.25f));
         Fill(new Rect(131,94,698,336),new Color(.045f,.105f,.12f,.95f));
         Fill(new Rect(131,94,698,5),new Color(.98f,.73f,.35f));
-        Label(new Rect(100, 110, 760, 68), "SOBREVIVISTE", titleStyle);
+        Label(new Rect(100, 110, 760, 68), WinnerTitle(), titleStyle);
         Label(new Rect(160, 215, 640, 72), insiderBetrayed ? "La cinta de la alarma lleva la firma de Nerea. Al salir, te llevas la grabación como prueba." : "La puerta se cierra detrás de ti. En tu bolsillo queda una tarjeta de Nerea: «Ahora puedes contarlo».", bodyStyle);
         if (GUI.Button(new Rect(365, 345, 230, 60), "JUGAR DE NUEVO", buttonStyle)) screen = Screen.Title;
     }

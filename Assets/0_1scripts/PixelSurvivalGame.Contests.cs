@@ -6,10 +6,11 @@ public sealed partial class PixelSurvivalGame
     private float[] nerve, craft, botClock;
     private int[] botStep, cracks;
     private readonly int[] cuts = new int[2], wounds = new int[2];
-    private readonly Texture2D[] cookieFaces=new Texture2D[6];
+    private readonly Texture2D[,] cookieFaces=new Texture2D[4,6];
     private readonly float[] pulse = new float[2], shield = new float[2], cooldown = new float[2];
     private readonly bool[] knownGlass = new bool[8];
     private bool[] nightHostile = new bool[0];
+    private bool[] tugAllies = System.Array.Empty<bool>();
     private Vector2[] knockback;
     private int ballots, yes, no, ally;
     private bool share, doubleCross;
@@ -17,7 +18,7 @@ public sealed partial class PixelSurvivalGame
 
     private void CreateRoster()
     {
-        rivalBots = 30 - humanCount;
+        rivalBots = CampaignBots;
         botRunnerAlive = new bool[rivalBots];
         nerve = new float[rivalBots];
         craft = new float[rivalBots];
@@ -34,6 +35,19 @@ public sealed partial class PixelSurvivalGame
 
     private void PrepareContest()
     {
+        if ((Trial)trialIndex == Trial.Tug)
+        {
+            tugAllies = new bool[rivalBots];
+            int allies = humanCount, opponents = 0;
+            for (int i = 0; i < rivalBots; i++)
+            {
+                if (!botRunnerAlive[i]) continue;
+                tugAllies[i] = allies < opponents;
+                if (tugAllies[i]) allies++;
+                else opponents++;
+            }
+        }
+        if ((Trial)trialIndex == Trial.Cookie || (Trial)trialIndex == Trial.Tug) PrepareTimingTrial();
         botClock = new float[rivalBots];
         botStep = new int[rivalBots];
         knockback = new Vector2[rivalBots];
@@ -51,14 +65,15 @@ public sealed partial class PixelSurvivalGame
             nightHostile[i] = i==ally && share ? doubleCross : nerve[i]>.58f;
             botClock[i] = Random.Range(.3f, 1.6f);
             if ((Trial)trialIndex == Trial.Night)
-                botPosition[i] = new Vector2(-7f + (i % 8)*2f, 1f + (i / 8)*1.6f);
+                botPosition[i] = new Vector2(-7f + (i % 8)*2f, -3.8f + (i / 8)*1.65f);
         }
     }
 
     private void ResolveRoster()
     {
         if ((Trial)trialIndex == Trial.Tug)
-            for (int i = 1; i < rivalBots; i += 2) botRunnerAlive[i] = false;
+            for (int i = 0; i < rivalBots; i++)
+                if (!tugAllies[i]) botRunnerAlive[i] = false;
         if ((Trial)trialIndex == Trial.Cookie)
         {
             // Allow the rest of the room its full turn even if the humans finished early.
@@ -117,10 +132,12 @@ public sealed partial class PixelSurvivalGame
         string line;
         switch ((Trial)trialIndex)
         {
-            case Trial.Cookie: line = phaseTime < 3f ? "El recuento termina. Bajo cada tapa de metal espera una estrella de azúcar." : "Nerea: «Mira la punta. Si aprietas antes de llegar a la esquina, se parte»."; break;
-            case Trial.Carousel: line = phaseTime < 3f ? "Al otro lado del comedor se encienden las bombillas de un carrusel. Los guardias abren las puertas de colores." : "Nerea: «Escucha el número. Si dicen tres, contamos tú, yo y una persona más»."; break;
+            case Trial.Cookie: line = phaseTime < 3f ? "El recuento termina. Bajo cada tapa de metal espera una figura de azúcar." : "Nerea: «Sigue la aguja. Tienes que acertar cinco veces sin partir la figura»."; break;
+            case Trial.Carousel: line = phaseTime < 3f ? "Al otro lado del comedor se encienden las bombillas de un carrusel. Los guardias abren las puertas de colores." : "Nerea: «Mira cada puerta. Si marca dos de tres, solo cabe una persona más»."; break;
             case Trial.Night: line = phaseTime < 3f ? "Las bandejas vuelven vacías. Alguien ha escondido las raciones bajo una litera." : "Por los altavoces: «Esta noche los guardias harán el recuento desde fuera»."; break;
             case Trial.Tug: line = "Al amanecer, una cuerda reúne a los supervivientes. Esta vez solo cruzará el equipo que tire al mismo ritmo."; break;
+            case Trial.Rope: line = "Las muñecas darán doce vueltas. Un mal salto te deja fuera; tu compañero puede seguir."; break;
+            case Trial.Final: line = "Los VIP toman asiento. Salta hasta la salida dorada. Cada loseta cede poco después de que alguien la pise."; break;
             default: line = "Las puertas se abren sobre ocho pares de cristales. Desde la fila de atrás alguien susurra: «Recuerda dónde pisó el primero»."; break;
         }
         Fill(new Rect(40,365,880,140),new Color(.02f,.03f,.06f,.92f));
@@ -147,16 +164,18 @@ public sealed partial class PixelSurvivalGame
             if (cuts[p] >= 5) continue;
             pulse[p] += dt * (.78f + .045f*cuts[p]);
             if (!Pressed(k,p == 0 ? Key.Space : Key.Enter)) continue;
-            if (Mathf.PingPong(pulse[p],1f) >= .70f) { cuts[p]++; pulse[p] = 0f; Chime(1.15f+.1f*cuts[p]); }
-            else if (++cracks[p] >= 3) { CompleteTrial(false,"La tercera grieta partió la estrella."); return; }
+            if (TimingHit(p,CookieWidth(p))) { cuts[p]++; Chime(1.15f+.1f*cuts[p]); }
+            else if (++cracks[p] >= 3) { CompleteTrial(false,"La tercera grieta partió la figura."); return; }
+            else Chime(.58f);
+            PickBand(p);
         }
-        if (cuts[0] == 5 && (humanCount == 1 || cuts[1] == 5)) CompleteTrial(true,"La estrella salió entera.");
+        if (cuts[0] == 5 && (humanCount == 1 || cuts[1] == 5)) CompleteTrial(true,"La figura salió entera.");
         else if (trialTime > 42f) CompleteTrial(false,"El guardia recogió las latas al sonar la campana.");
     }
 
     private void DrawCookie()
     {
-        Label(new Rect(80,98,800,55),"Separa las cinco puntas. Pulsa cuando la aguja entre en la zona verde.",bodyStyle);
+        Label(new Rect(80,98,800,55),$"{ShapeNames[cookieShape]} · Completa cinco tramos. Pulsa cuando la aguja entre en el verde.",bodyStyle);
         Label(new Rect(350,155,260,32),Mathf.CeilToInt(42f-trialTime)+" s",smallStyle);
         for (int p = 0; p < humanCount; p++)
         {
@@ -164,60 +183,67 @@ public sealed partial class PixelSurvivalGame
             GUI.DrawTexture(new Rect(x-90,175,180,180),CookieFace(cuts[p]));
             if (cuts[p]<5)
             {
-                float along=Mathf.PingPong(pulse[p],1f)*2f;
-                int segment=Mathf.Min(1,Mathf.FloorToInt(along));
-                int edge=cuts[p]*2+segment;
-                Vector2 tip=Vector2.Lerp(StarPoint(edge,x),StarPoint(edge+1,x),along-segment);
+                Vector2 tip=CookiePoint((cuts[p]+Needle(p))/5f)+new Vector2(x,265);
                 Fill(new Rect(tip.x-4,tip.y-4,8,8),Color.white);
             }
-            Fill(new Rect(x-110,380,220,18),Color.black);
-            Fill(new Rect(x+44,380,66,18),new Color(.2f,.7f,.37f));
-            Fill(new Rect(x-110+216*Mathf.PingPong(pulse[p],1f),373,4,32),Color.white);
+            DrawBand(new Rect(x-110,380,220,18),p,CookieWidth(p));
             Label(new Rect(x-165,410,330,55),$"J{p+1} · {(p==0?"ESPACIO":"ENTER")}   {cuts[p]}/5\nGrietas {cracks[p]}/3",smallStyle);
         }
     }
 
-    private static Vector2 StarPoint(int n,float x)
+    private Vector2 CookiePoint(float t)
     {
-        float a = n*Mathf.PI/5f - Mathf.PI/2f;
-        return new Vector2(x,265) + new Vector2(Mathf.Cos(a),Mathf.Sin(a))*(n%2==0?72:32);
+        if(cookieShape==1) return CookieVertex(t,66);
+        int sides=cookieShape==0?10:cookieShape==2?3:4;
+        float step=Mathf.Repeat(t,1)*sides;
+        int a=Mathf.FloorToInt(step), b=(a+1)%sides;
+        float shift=cookieShape==3?.125f:0f;
+        Vector2 first=CookieVertex(a/(float)sides+shift,cookieShape==0 && a%2==1?32:72);
+        Vector2 next=CookieVertex(b/(float)sides+shift,cookieShape==0 && b%2==1?32:72);
+        return Vector2.Lerp(first,next,step-a);
+    }
+
+    private static Vector2 CookieVertex(float turn,float radius)
+    {
+        float angle=(turn-.25f)*Mathf.PI*2;
+        return new Vector2(Mathf.Cos(angle),Mathf.Sin(angle))*radius;
     }
 
     private Texture2D CookieFace(int completed)
     {
-        if(cookieFaces[completed]!=null) return cookieFaces[completed];
+        if(cookieFaces[cookieShape,completed]!=null) return cookieFaces[cookieShape,completed];
         const int size=180;
         var pixels=new Color32[size*size];
-        var points=new Vector2[11];
-        for(int n=0;n<=10;n++) points[n]=StarPoint(n,90)-new Vector2(0,175);
+        var middle=new Vector2(90,90);
         for(int y=0;y<size;y++)
         for(int x=0;x<size;x++)
         {
             Vector2 p=new Vector2(x+.5f,y+.5f);
             float radius=(p-new Vector2(90,90)).magnitude;
             if(radius>89.8f) continue;
-            float edgeDistance=float.PositiveInfinity;
-            int edge=0;
-            for(int n=0;n<10;n++)
-            {
-                Vector2 segment=points[n+1]-points[n], offset=p-points[n];
-                float t=Mathf.Clamp01(Vector2.Dot(offset,segment)/segment.sqrMagnitude);
-                float distance=(offset-segment*t).sqrMagnitude;
-                if(distance<edgeDistance){edgeDistance=distance;edge=n;}
-            }
             float grain=((x*31+y*17+x*y*3)%19)/160f;
             Color color=Color.Lerp(new Color(.98f,.71f,.31f),new Color(.72f,.38f,.12f),(.34f*x+.66f*y)/size+grain);
             if(radius>86) color*=.72f;
             else if(radius>83.8f) color=Color.Lerp(color,Color.white,.22f);
-            if(edgeDistance<8f) color=new Color(.47f,.24f,.08f);
-            if(edgeDistance<2f) color=edge/2<completed?new Color(.37f,.95f,.59f):new Color(1f,.81f,.42f);
             color.a=Mathf.Clamp01(90-radius);
             pixels[(size-1-y)*size+x]=color;
+        }
+        // Draw the same contour the moving tip follows. Render the groove before its highlight.
+        for(int pass=0;pass<2;pass++)
+        for(int n=0;n<720;n++)
+        {
+            var point=middle+CookiePoint(n/720f);
+            int cx=Mathf.RoundToInt(point.x),cy=Mathf.RoundToInt(point.y);
+            int radius=pass==0?3:1;
+            Color32 ink=pass==0?new Color(.47f,.24f,.08f):n<completed*144?new Color(.37f,.95f,.59f):new Color(1f,.81f,.42f);
+            for(int dy=-radius;dy<=radius;dy++)
+            for(int dx=-radius;dx<=radius;dx++)
+                if(dx*dx+dy*dy<=radius*radius) pixels[(size-1-cy-dy)*size+cx+dx]=ink;
         }
         var texture=new Texture2D(size,size,TextureFormat.RGBA32,false){name="Dalgona "+completed,wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
         texture.SetPixels32(pixels);
         texture.Apply(false,true);
-        cookieFaces[completed]=texture;
+        cookieFaces[cookieShape,completed]=texture;
         return texture;
     }
 

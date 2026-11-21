@@ -30,11 +30,11 @@ public static class CreateTugOfWar2D
         var arena = new GameObject("Tira y afloja sobre las nubes");
         BuildBackground(arena.transform, background, white);
         BuildPlatforms(arena.transform, white);
-        GameObject marker = BuildRope(arena.transform, white);
+        BuildRope(arena.transform, white);
         BuildTeams(arena.transform, playerPrefab, bluePrefab, redPrefab);
         BuildLabels(arena.transform);
         BuildCamera();
-        BuildGameManager(arena.transform, marker);
+        BuildGameManager(arena.transform);
 
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene, ScenePath);
@@ -98,7 +98,7 @@ public static class CreateTugOfWar2D
         }
     }
 
-    private static GameObject BuildRope(Transform parent, Sprite white)
+    private static void BuildRope(Transform parent, Sprite white)
     {
         SpriteObject("Cuerda de tira y afloja", white, new Vector3(0f, 2.4f, -0.15f), new Vector3(43f, 0.34f, 1f),
             new Color(0.36f, 0.2f, 0.12f), parent, 0);
@@ -125,7 +125,6 @@ public static class CreateTugOfWar2D
         marker.transform.localScale = new Vector3(0.48f, 1.15f, 1f);
         SpriteObject("Punta de la marca", white, new Vector3(0f, -0.58f, -0.02f), new Vector3(0.75f, 0.22f, 1f),
             new Color(0.95f, 0.12f, 0.2f), marker.transform, 9, Quaternion.Euler(0f, 0f, 45f));
-        return marker;
     }
 
     private static void BuildTeams(Transform parent, GameObject playerPrefab, GameObject bluePrefab, GameObject redPrefab)
@@ -171,16 +170,11 @@ public static class CreateTugOfWar2D
         camera.backgroundColor = new Color(0.55f, 0.78f, 0.95f);
     }
 
-    private static void BuildGameManager(Transform parent, GameObject marker)
+    private static void BuildGameManager(Transform parent)
     {
         var manager = new GameObject("Control del tira y afloja");
         manager.transform.SetParent(parent, false);
-        TugOfWarGame game = manager.AddComponent<TugOfWarGame>();
-        TextMesh instruction = GameObject.Find("Instrucciones del juego").GetComponent<TextMesh>();
-        var serialized = new SerializedObject(game);
-        serialized.FindProperty("centerMarker").objectReferenceValue = marker.transform;
-        serialized.FindProperty("instructionText").objectReferenceValue = instruction;
-        serialized.ApplyModifiedPropertiesWithoutUndo();
+        manager.AddComponent<TugOfWarGame>();
     }
 
     private static GameObject MakeCharacterPrefab(string name, Sprite sprite, string path)

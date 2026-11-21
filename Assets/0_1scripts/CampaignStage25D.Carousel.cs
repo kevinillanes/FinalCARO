@@ -112,7 +112,7 @@ public sealed partial class CampaignStage25D
         Sphere("Remate",new Vector3(0,4.18f,0),.32f,goldMat,carouselPlatform);
     }
 
-    public void ShowCarousel(float angle,int[] rooms,int[] counts,int target,int humans,Vector2[] players,
+    public void ShowCarousel(float angle,int[] rooms,int[] counts,int[] capacity,int humans,Vector2[] players,
         Vector2[] bots,bool[] alive,bool open,bool[] moving)
     {
         carouselPlatform.localRotation=Quaternion.Euler(0,angle,0);
@@ -123,7 +123,7 @@ public sealed partial class CampaignStage25D
             scale.y=Mathf.MoveTowards(scale.y,open?.10f:2.4f,Time.deltaTime*9f);
             shutter.localScale=scale;
             shutter.localPosition=new Vector3(0,2.45f-scale.y*.5f,.48f);
-            doorLamps[d].sharedMaterial=!open?whiteMat:counts[d]==target?greenMat:counts[d]>target?redMat:goldMat;
+            doorLamps[d].sharedMaterial=!open?whiteMat:counts[d]==capacity[d]?greenMat:counts[d]>capacity[d]?redMat:goldMat;
         }
         for (int i=0;i<actors.Count;i++)
         {
@@ -142,7 +142,7 @@ public sealed partial class CampaignStage25D
         return new Vector2((screenPoint.x-Screen.width*.5f)/scale+480f,(Screen.height*.5f-screenPoint.y)/scale+270f);
     }
 
-    public void DrawCarouselMarkers(int[] counts,int target,GUIStyle style,int humans,int[] rooms)
+    public void DrawCarouselMarkers(int[] counts,int[] capacity,GUIStyle style,int humans,int[] rooms)
     {
         if (!HasCarousel) return;
         for (int d=0;d<counts.Length;d++)
@@ -151,9 +151,9 @@ public sealed partial class CampaignStage25D
             Vector2 point=CarouselLabel(new Vector3(entry.x,3f,entry.y));
             bool one=rooms[0]==d, two=humans==2 && rooms[1]==d;
             string marker=one && two?"J1 + J2":one?"J1":two?"J2":"";
-            string count=counts[d]+"/"+target;
+            string count=counts[d]+"/"+capacity[d];
             Rect badge=new Rect(point.x-29,point.y-13,58,24);
-            GUI.color=counts[d]==target?new Color(.06f,.36f,.22f,.96f):counts[d]>target?new Color(.6f,.08f,.16f,.96f):new Color(.06f,.06f,.14f,.94f);
+            GUI.color=counts[d]==capacity[d]?new Color(.06f,.36f,.22f,.96f):counts[d]>capacity[d]?new Color(.6f,.08f,.16f,.96f):new Color(.06f,.06f,.14f,.94f);
             GUI.DrawTexture(badge,Texture2D.whiteTexture);
             GUI.color=Color.white;
             GUI.Label(badge,(d+1)+" · "+count,style);

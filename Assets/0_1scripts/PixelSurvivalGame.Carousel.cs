@@ -14,8 +14,9 @@ public sealed partial class PixelSurvivalGame
         new Vector2(7.6f,6), new Vector2(8.8f,1), new Vector2(8.8f,-4)
     };
     private CarouselPhase carouselPhase;
-    private int carouselRound, groupSize;
-    private float carouselClock, carouselAngle, nextNote;
+    private int carouselRound;
+    private readonly int[] capacity = new int[CarouselDoors.Length];
+    private float carouselClock, carouselAngle, nextNote, groupsSettled;
     private int[] carouselRoom, destination;
     private readonly int[] roomCount = new int[CarouselDoors.Length], expected = new int[CarouselDoors.Length];
     private readonly string[] doorNotice = new string[2];
@@ -36,8 +37,14 @@ public sealed partial class PixelSurvivalGame
     {
         carouselRound++;
         int living = humanCount + RemainingRivals();
-        int wanted = carouselRound == 1 ? 3 : carouselRound == 2 ? 4 : 2;
-        groupSize = Mathf.Min(wanted, living);
+        // Scatter all four sizes before drawing the remaining rooms.
+        for (int d=0; d<capacity.Length; d++)
+            capacity[d]=Mathf.Min(living,d<4 ? d+1 : Random.Range(1,5));
+        for (int d=capacity.Length-1; d>0; d--)
+        {
+            int swap=Random.Range(0,d+1);
+            (capacity[d],capacity[swap])=(capacity[swap],capacity[d]);
+        }
         System.Array.Fill(carouselRoom,-1);
         System.Array.Fill(destination,-1);
         System.Array.Clear(roomCount,0,roomCount.Length);
@@ -54,10 +61,11 @@ public sealed partial class PixelSurvivalGame
         for (int slot=0; slot<carouselRoom.Length; slot++)
         {
             if (slot==1 && humanCount==1 || slot>=2 && !botRunnerAlive[slot-2]) continue;
-            int ring = index % 2;
-            int inRing = (living + 1 - ring)/2;
-            float angle = (carouselAngle + 360f*(index/2 + ring*.5f)/inRing)*Mathf.Deg2Rad;
-            float radius = ring==0 ? 3.35f : 2.05f;
+            int rings=living>32 ? 3 : 2;
+            int ring=index%rings;
+            int inRing=(living+rings-1-ring)/rings;
+            float angle = (carouselAngle + 360f*(index/rings + ring*.5f)/inRing)*Mathf.Deg2Rad;
+            float radius=3.65f-ring*1.05f;
             Vector2 pos = new Vector2(Mathf.Sin(angle),Mathf.Cos(angle))*radius;
             if (slot<2) finalPosition[slot]=pos;
             else botPosition[slot-2]=pos;
@@ -104,12 +112,18 @@ public sealed partial class PixelSurvivalGame
             if (Pressed(k,p==0?Key.Space:Key.Enter)) UseCarouselDoor(p);
         }
         UpdateCarouselBots(dt);
+        // Keep the full time while someone is choosing. Once the groups have
+        // settled, give the humans a final chance to leave, then begin the count.
+        if (CarouselGroupsReady()) groupsSettled+=dt;
+        else groupsSettled=0;
+        if (groupsSettled>=2f) CountCarouselRooms();
     }
 
     private void OpenCarouselDoors()
     {
         carouselPhase=CarouselPhase.Doors;
         carouselClock=DoorSeconds;
+        groupsSettled=0;
         for (int i=0;i<rivalBots;i++)
         {
             if (!botRunnerAlive[i]) continue;
@@ -130,12 +144,29 @@ public sealed partial class PixelSurvivalGame
         return nearest;
     }
 
-    private void SetCarouselRoom(int slot,int room)
+    private bool CarouselGroupsReady()
+    {
+        for(int p=0;p<humanCount;p++)
+            if(carouselRoom[p]<0 || roomCount[carouselRoom[p]]!=capacity[carouselRoom[p]]) return false;
+        int inside=0, places=0;
+        for(int d=0;d<capacity.Length;d++)
+        {
+            if(roomCount[d]!=0 && roomCount[d]!=capacity[d]) return false;
+            inside+=roomCount[d];
+            places+=capacity[d];
+        }
+        return inside==Mathf.Min(humanCount+RemainingRivals(),places);
+    }
+
+    private bool SetCarouselRoom(int slot,int room)
     {
         int old=carouselRoom[slot];
-        if (old>=0) roomCount[old]--;
+        if(old==room) return true;
+        if(room>=0 && roomCount[room]>=capacity[room]) return false;
+        if(old>=0) roomCount[old]--;
         carouselRoom[slot]=room;
-        if (room>=0) roomCount[room]++;
+        if(room>=0) roomCount[room]++;
+        return true;
     }
 
     private void UseCarouselDoor(int p)
@@ -149,8 +180,9 @@ public sealed partial class PixelSurvivalGame
             return;
         }
         int room=NearestCarouselDoor(finalPosition[p]);
-        if (room>=0) { SetCarouselRoom(p,room); Chime(1.4f); }
-        else { doorNotice[p]="Acércate al umbral iluminado"; noticeUntil[p]=trialTime+1.1f; }
+        if (room>=0 && SetCarouselRoom(p,room)) { Chime(1.4f); return; }
+        doorNotice[p]=room<0?"Acércate al umbral iluminado":"Puerta llena · busca otra";
+        noticeUntil[p]=trialTime+1.25f;
     }
 
     private void UpdateCarouselBots(float dt)
@@ -165,16 +197,16 @@ public sealed partial class PixelSurvivalGame
             int slot=i+2, current=carouselRoom[slot];
             if (current>=0)
             {
-                if (botClock[i]>0 || roomCount[current]==groupSize) continue;
-                if (roomCount[current]<groupSize)
+                if (botClock[i]>0 || roomCount[current]==capacity[current]) continue;
+                if (roomCount[current]<capacity[current])
                 {
                     // An incomplete group may still have riders on their way. Only abandon it
                     // late and for an occupied room the bot can reach before the doors close.
-                    if (carouselClock>6 || expected[current]>=groupSize || HasHumanInside(current)) continue;
+                    if (carouselClock>6 || expected[current]>=capacity[current] || HasHumanInside(current)) continue;
                     int other=ChooseCarouselDoor(i,current);
                     if (other<0 || other==current || roomCount[other]==0 ||
-                        !HasHumanInside(other) && roomCount[other]<roomCount[current] ||
-                        Vector2.Distance(CarouselDoors[current],CarouselDoors[other])>(2.6f+1.7f*nerve[i])*carouselClock) continue;
+                        !HasHumanInside(other) && capacity[other]-expected[other]>=capacity[current]-expected[current] ||
+                        Vector2.Distance(CarouselDoors[current],CarouselDoors[other])>(2.6f+1.7f*nerve[i])*Mathf.Max(0,carouselClock-.7f)) continue;
                     destination[i]=other;
                     expected[other]++;
                 }
@@ -183,10 +215,13 @@ public sealed partial class PixelSurvivalGame
                 botPosition[i]=CarouselDoors[current];
             }
             int target=destination[i];
-            if (botClock[i]<=0 && (target<0 || expected[target]>groupSize))
+            if (botClock[i]<=0)
             {
                 if (target>=0) expected[target]--;
-                target=ChooseCarouselDoor(i);
+                int candidate=ChooseCarouselDoor(i);
+                if(target<0 || expected[target]>=capacity[target] ||
+                    (candidate>=0 && HasHumanInside(candidate) && !HasHumanInside(target)))
+                    target=candidate;
                 destination[i]=target;
                 if (target>=0) expected[target]++;
                 botClock[i]=.55f + (1f-craft[i])*.6f;
@@ -212,6 +247,13 @@ public sealed partial class PixelSurvivalGame
             }
             botPosition[i]=ArenaView.SlidePastColumn(start,Vector2.MoveTowards(start,waypoint,dt*(2.6f+1.7f*nerve[i])),true);
             if (target<0 || (botPosition[i]-threshold).sqrMagnitude>.35f) continue;
+            if (roomCount[target]>=capacity[target])
+            {
+                expected[target]--;
+                destination[i]=-1;
+                botClock[i]=0f;
+                continue;
+            }
             SetCarouselRoom(slot,target);
             destination[i]=-1;
             botClock[i]=1f;
@@ -224,7 +266,7 @@ public sealed partial class PixelSurvivalGame
         float bestScore=float.NegativeInfinity;
         for (int d=0;d<CarouselDoors.Length;d++)
         {
-            if (d==exclude || expected[d]>=groupSize) continue;
+            if (d==exclude || expected[d]>=capacity[d]) continue;
             float score=(HasHumanInside(d)?18f:0f) + expected[d]*3f - Vector2.Distance(botPosition[bot],CarouselDoors[d]);
             if (score>bestScore) { best=d; bestScore=score; }
         }
@@ -243,14 +285,14 @@ public sealed partial class PixelSurvivalGame
         {
             int door=carouselRoom[p];
             if (door<0) failure=$"J{p+1} quedó fuera cuando se cerraron las puertas.";
-            else if (roomCount[door]!=groupSize)
-                failure=$"Puerta {door+1}: había {roomCount[door]}. Se necesitaban exactamente {groupSize}.";
+            else if (roomCount[door]!=capacity[door])
+                failure=$"Puerta {door+1}: había {roomCount[door]}. Se necesitaban exactamente {capacity[door]}.";
         }
         int before=RemainingRivals();
         for (int i=0;i<rivalBots;i++)
         {
             int d=carouselRoom[i+2];
-            if (botRunnerAlive[i] && (d<0 || roomCount[d]!=groupSize)) botRunnerAlive[i]=false;
+            if (botRunnerAlive[i] && (d<0 || roomCount[d]!=capacity[d])) botRunnerAlive[i]=false;
         }
         if (ally>=0 && !botRunnerAlive[ally]) { ally=-1; share=doubleCross=false; }
         carouselPhase=CarouselPhase.Count;
@@ -268,15 +310,15 @@ public sealed partial class PixelSurvivalGame
         {
             Fill(new Rect(124,122,712,304),panel);
             Label(new Rect(144,135,672,48),"CUANDO PARE LA MÚSICA",titleStyle);
-            Label(new Rect(157,190,646,93),"Al parar la música, corre a una puerta. Si piden 3, deben quedar exactamente 3 dentro, contándote. Un cartel con 2/3 indica que falta una persona. Quien quede fuera pierde.",bodyStyle);
+            Label(new Rect(157,190,646,93),"Cada puerta sortea su propio cupo de 1 a 4. Un cartel 2/3 tiene una plaza libre. Entra antes del cierre: solo sobreviven los cuartos exactos. Una puerta llena rechaza tu entrada.",bodyStyle);
             Label(new Rect(146,285,668,68),humanCount==1?"J1 · WASD para moverte · ESPACIO para entrar o salir":"J1 · WASD + ESPACIO     J2 · Flechas + ENTER\nPueden elegir puertas distintas. Ambos deben quedar en grupos exactos.",smallStyle);
             Label(new Rect(144,363,672,44),"Pulsa ESPACIO o ENTER cuando estés listo",bodyStyle);
             return;
         }
-        if (carouselPhase==CarouselPhase.Doors) stage25D.DrawCarouselMarkers(roomCount,groupSize,smallStyle,humanCount,carouselRoom);
+        if (carouselPhase==CarouselPhase.Doors) stage25D.DrawCarouselMarkers(roomCount,capacity,smallStyle,humanCount,carouselRoom);
         Fill(new Rect(20,8,920,45),panel);
         Label(new Rect(22,8,290,44),$"CARRUSEL · VUELTA {carouselRound}/{CarouselRounds}\n{humanCount+RemainingRivals()} participantes",smallStyle);
-        string call=carouselPhase==CarouselPhase.Doors ? $"¡GRUPOS DE {groupSize}!    {Mathf.CeilToInt(carouselClock)} s"
+        string call=carouselPhase==CarouselPhase.Doors ? (groupsSettled>0 ? "GRUPOS LISTOS · CIERRE" : $"BUSCA UNA PLAZA    {Mathf.CeilToInt(carouselClock)} s")
             : carouselPhase==CarouselPhase.Count ? "GRUPO CORRECTO" : "EL CARRUSEL ESTÁ GIRANDO";
         Label(new Rect(316,8,615,44),call,titleStyle);
         if (carouselPhase!=CarouselPhase.Doors)
@@ -293,11 +335,12 @@ public sealed partial class PixelSurvivalGame
             string action;
             if (door>=0)
             {
-                int missing=groupSize-roomCount[door];
+                int missing=capacity[door]-roomCount[door];
                 string status=missing==0?"Grupo exacto":missing>0?$"Faltan {missing}":$"Sobran {-missing}";
                 action=$"Puerta {door+1} · {status} · {key} para salir";
             }
             else if (noticeUntil[p]>trialTime) action=doorNotice[p];
+            else if(near>=0 && roomCount[near]>=capacity[near]) action="Puerta llena · busca otra";
             else action=near>=0?$"{key} para entrar por la puerta {near+1}":(p==0?"WASD":"Flechas")+" · Acércate a una puerta";
             float x=humanCount==1?250:20+p*468;
             Fill(new Rect(x,463,440,35),panel);

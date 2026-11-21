@@ -40,11 +40,22 @@ public sealed partial class CampaignStage25D
                 size=Mathf.Lerp(Mathf.Max(18,31/aspect),size,opening);
             }
         }
-        if (stage && trial==Final && follow)
+        if (stage && trial==Final)
         {
-            Vector2 pos=people==2?(one+two)*.5f:one;
-            focus=new Vector3(pos.x/55f*.60f,1,pos.y/26f*.50f);
-            size=Mathf.Max(8.8f,14.2f/aspect);
+            focus=new Vector3(0f,1.5f,1.8f);
+            size=Mathf.Max(8.8f,14.0f/aspect);
+        }
+        if (stage && trial==Rope)
+        {
+            focus=new Vector3(0,1.6f,0);
+            size=Mathf.Max(6.8f,11.6f/aspect);
+        }
+        if (screen==Welcome)
+        {
+            float reveal=Mathf.SmoothStep(0,1,Mathf.Clamp01((phase-2.6f)/2f))*
+                (1-Mathf.SmoothStep(0,1,Mathf.Clamp01((phase-9.8f)/2.8f)));
+            focus=Vector3.Lerp(new Vector3(0,1.25f,1),new Vector3(0,4.55f,4.8f),reveal);
+            size=Mathf.Lerp(Mathf.Max(9.8f,15f/aspect),Mathf.Max(3.9f,6f/aspect),reveal);
         }
         if (stage && trial==Tug)
         {
