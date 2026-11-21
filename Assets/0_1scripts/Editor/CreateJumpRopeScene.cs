@@ -29,7 +29,7 @@ public static class CreateJumpRopeScene
             throw new System.InvalidOperationException("Faltan sprites base en Assets/Art/Tira2D.");
 
         var arena = new GameObject("Reto de la cuerda giratoria");
-        Shape("Fondo del tira y afloja", background, Vector2.zero, new Vector2(52f, 31f), Color.white, arena.transform, -100);
+        Shape("Fondo del tira y afloja", background, Vector2.zero, Vector2.one*3.6f, Color.white, arena.transform, -100).transform.localPosition = new Vector3(0,2.7f,10);
         Shape("Plataforma flotante cerrada", white, new Vector2(0f, -0.25f), new Vector2(47f, 2f), new Color(0.17f, 0.22f, 0.3f), arena.transform, -20);
         Shape("Piso continuo", white, new Vector2(0f, 0.75f), new Vector2(46.8f, 0.25f), new Color(0.58f, 0.64f, 0.68f), arena.transform, -19);
         Shape("Borde dorado", white, new Vector2(0f, 0.92f), new Vector2(46.8f, 0.1f), new Color(0.95f, 0.73f, 0.35f), arena.transform, -18);
@@ -60,9 +60,10 @@ public static class CreateJumpRopeScene
 
         Camera camera = cameraObject.GetComponent<Camera>();
         camera.orthographic = true;
+        camera.fieldOfView = 47f;
         camera.orthographicSize = 13f;
         cameraObject.transform.position = new Vector3(0f, 2.7f, -30f);
-        cameraObject.transform.rotation = Quaternion.identity;
+        cameraObject.transform.rotation = Quaternion.Euler(35.26439f,45f,0);
         var game = arena.AddComponent<JumpRopeGame>();
         var serialized = new SerializedObject(game);
         serialized.FindProperty("rope").objectReferenceValue = pivot.transform;

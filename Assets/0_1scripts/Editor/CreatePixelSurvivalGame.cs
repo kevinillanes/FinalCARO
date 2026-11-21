@@ -17,12 +17,15 @@ public static class CreatePixelSurvivalGame
         cameraObject.transform.position = new Vector3(0f, 0f, -10f);
         Camera camera = cameraObject.GetComponent<Camera>();
         camera.orthographic = true;
-        camera.orthographicSize = 270f;
+        camera.fieldOfView = 48f;
         camera.clearFlags = CameraClearFlags.SolidColor;
         camera.backgroundColor = new Color(0.035f, 0.045f, 0.09f);
         camera.nearClipPlane = 0.1f;
-        camera.farClipPlane = 100f;
-        cameraObject.AddComponent<PixelSurvivalGame>();
+        camera.farClipPlane = 160f;
+        var game = new SerializedObject(cameraObject.AddComponent<PixelSurvivalGame>());
+        game.FindProperty("leftTree").objectReferenceValue=AssetDatabase.LoadAssetAtPath<GameObject>("Assets/0_2prefabs/Arbolito_1.prefab");
+        game.FindProperty("rightTree").objectReferenceValue=AssetDatabase.LoadAssetAtPath<GameObject>("Assets/0_2prefabs/Arbolito_2.prefab");
+        game.ApplyModifiedPropertiesWithoutUndo();
 
         EditorSceneManager.MarkSceneDirty(scene);
         if (!EditorSceneManager.SaveScene(scene, ScenePath))

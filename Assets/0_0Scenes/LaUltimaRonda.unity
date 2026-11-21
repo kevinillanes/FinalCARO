@@ -150,7 +150,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 997208aa426606e429248621fd30a3df, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PixelSurvivalGame
-  rivalBots: 11
+  leftTree: {fileID: 8881905388110654651, guid: 0baaf1a6171ebab409d78cf07a6acb4a, type: 3}
+  rightTree: {fileID: 6361021908504347632, guid: 467ed2a2c83dcfe479b62843fea165ad, type: 3}
 --- !u!81 &786865418
 AudioListener:
   m_ObjectHideFlags: 0
@@ -191,10 +192,10 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.1
-  far clip plane: 100
-  field of view: 60
+  far clip plane: 160
+  field of view: 48
   orthographic: 1
-  orthographic size: 270
+  orthographic size: 11
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
@@ -218,13 +219,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 786865416}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -10}
+  m_LocalRotation: {x: 0.27985, y: 0.36471, z: -0.11592, w: 0.88048}
+  m_LocalPosition: {x: -21, y: 22, z: -21}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 35.26439, y: 45, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

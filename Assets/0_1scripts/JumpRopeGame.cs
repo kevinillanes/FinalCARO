@@ -27,15 +27,26 @@ public sealed class JumpRopeGame : MonoBehaviour
     private float[] botJumpUntil;
     private float[] botBaseY;
     private bool ended;
+    private RopePracticeStage stage;
 
     private void Start()
     {
+        stage=gameObject.AddComponent<RopePracticeStage>();
+        stage.Build(true,rope);
         if (playerOne != null) baseY[0] = playerOne.position.y;
         if (playerTwo != null) baseY[1] = playerTwo.position.y;
         botJumpUntil = new float[bots == null ? 0 : bots.Length];
         botBaseY = new float[botJumpUntil.Length];
         for (int i = 0; i < botBaseY.Length; i++) if (bots[i] != null) botBaseY[i] = bots[i].position.y;
         UpdateText("Listos: 0/" + requiredJumps + " saltos  ·  Fallos: 0/" + missesAllowed);
+    }
+
+    private void OnGUI()
+    {
+        if (GUI.Button(new Rect(12,12,132,34),"Volver al menú"))
+            UnityEngine.SceneManagement.SceneManager.LoadScene("LaUltimaRonda");
+        if(instructions!=null) GUI.Box(new Rect((Screen.width-500)*.5f,Screen.height-100,500,92),instructions.text);
+        if(timingCue!=null && !ended) GUI.Box(new Rect((Screen.width-160)*.5f,20,160,32),timingCue.text);
     }
 
     private void Update()
@@ -45,10 +56,11 @@ public sealed class JumpRopeGame : MonoBehaviour
         if (k == null) return;
 
         float dt = Time.deltaTime;
-        timer += dt;
         period = Mathf.Max(1.45f, 2.6f - jumps * 0.065f);
-        float phase = timer % period;
-        if (rope != null) rope.Rotate(0f, 0f, -360f / period * dt);
+        timer += dt / period;
+        if (timer >= 1f) { timer %= 1f; resolvedThisSpin = false; }
+        float phase = timer * period;
+        stage.DrawCable(timer,0f);
 
         bool danger = phase > period * 0.72f && phase < period * 0.88f;
         if (timingCue != null)
@@ -93,7 +105,7 @@ public sealed class JumpRopeGame : MonoBehaviour
             if (misses >= missesAllowed) Finish(false);
             resolvedThisSpin = true;
         }
-        if (phase < 0.15f) resolvedThisSpin = false;
+
         if (jumps >= requiredJumps) Finish(true);
     }
 

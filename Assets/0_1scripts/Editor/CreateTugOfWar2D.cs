@@ -47,7 +47,7 @@ public static class CreateTugOfWar2D
     {
         if (sky != null)
         {
-            SpriteObject("Fondo del tira y afloja", sky, new Vector3(0f, 2.5f, 10f), new Vector3(48f, 30f, 1f), Color.white, parent, -100);
+            SpriteObject("Fondo del tira y afloja", sky, new Vector3(0f, 2.5f, 10f), new Vector3(3.6f,3.6f,1f), Color.white, parent, -100);
             return;
         }
         SpriteObject("Cielo", sky, new Vector3(0f, 2.5f, 10f), new Vector3(48f, 30f, 1f), new Color(1f, 1f, 1f, 1f), parent, -100);
@@ -160,9 +160,10 @@ public static class CreateTugOfWar2D
         var cameraObject = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
         cameraObject.tag = "MainCamera";
         cameraObject.transform.position = new Vector3(0f, 2.6f, -30f);
-        cameraObject.transform.rotation = Quaternion.identity;
+        cameraObject.transform.rotation = Quaternion.Euler(35.26439f,45f,0);
         Camera camera = cameraObject.GetComponent<Camera>();
         camera.orthographic = true;
+        camera.fieldOfView = 47f;
         camera.orthographicSize = 13f;
         camera.nearClipPlane = 0.1f;
         camera.farClipPlane = 100f;

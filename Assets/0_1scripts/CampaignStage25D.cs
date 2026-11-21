@@ -2,25 +2,39 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>Builds the campaign arenas as small, perspective 3D sets while keeping play on a readable plane.</summary>
-public sealed class CampaignStage25D : MonoBehaviour
+public sealed partial class CampaignStage25D : MonoBehaviour
 {
-    private const int Title = 0, Kidnap = 1, Round = 2, Result = 3, Insider = 4, Betrayal = 5, Ending = 6, GameOver = 7;
-    private const int RedLight = 0, Tug = 1, Bridge = 2, Final = 3;
+    private const int Title = 0, Kidnap = 1, Round = 2, Result = 3, Insider = 4, Betrayal = 5, Ending = 6, GameOver = 7, Vote = 8, Interlude = 9;
+    private const int RedLight = (int)PixelSurvivalGame.Trial.RedLight, Cookie = (int)PixelSurvivalGame.Trial.Cookie,
+        Carousel = (int)PixelSurvivalGame.Trial.Carousel, Night = (int)PixelSurvivalGame.Trial.Night,
+        Tug = (int)PixelSurvivalGame.Trial.Tug, Bridge = (int)PixelSurvivalGame.Trial.Bridge, Final = (int)PixelSurvivalGame.Trial.Final;
+    private int rosterSlots = 31;
     private readonly List<GameObject> actors = new List<GameObject>();
     private Transform stageRoot;
     private Camera sceneCamera;
     private Material floorMat, roomFloorMat, wallMat, darkMat, greenMat, grassMat, redMat, pinkMat, blueMat, glassMat, goldMat, whiteMat, woodMat, skinMat;
     private Sprite playerSprite, playerWalkA, playerWalkB, guardSprite, armedGuardSprite;
-    private Sprite redLightBackdrop, campaignTugBackdrop, roomBackdrop;
     private Sprite[] dollFrames;
     private GameObject ropeMarker, doll, van;
-    private GameObject cameraBackdrop;
+    private ArenaCharacterArt characterArt;
+    private readonly Dictionary<GameObject, ArenaCharacterPose> poses = new Dictionary<GameObject, ArenaCharacterPose>();
+    private readonly HashSet<Renderer> cutaway = new HashSet<Renderer>();
+    private readonly RaycastHit[] obstructionHits = new RaycastHit[64];
+    private float sizeVelocity;
+    private Renderer signalLamp;
+    private GameObject leftTree,rightTree;
+    private float tugEnd;
+    public void SetFinishTrees(GameObject left,GameObject right){leftTree=left; rightTree=right;}
+    private Vector3[] jumpStart, jumpEnd;
+    private float[] jumpBlend;
+    private Material sandstone, terracotta, trackSoil;
+    private Texture2D aggregate, floorTiles;
     private SpriteRenderer dollRenderer;
     private LineRenderer shotTrail, tugRope, tugRopeFiberA, tugRopeFiberB;
     private readonly List<GameObject> bridgeLeft = new List<GameObject>();
     private readonly List<GameObject> bridgeRight = new List<GameObject>();
     private int lastScreen = -1, lastTrial = -1;
-    private float animClock;
+    private float animClock, ropeCenter, ropeSpeed, dollFrame;
     private Vector3 cameraVelocity;
     private bool cameraReady;
     private static readonly Color FieldGreen = new Color(.20f, .37f, .24f);
@@ -32,7 +46,7 @@ public sealed class CampaignStage25D : MonoBehaviour
         if (sceneCamera == null) sceneCamera = FindAnyObjectByType<Camera>();
         if (sceneCamera != null)
         {
-            sceneCamera.orthographic = false;
+            sceneCamera.orthographic = true;
             sceneCamera.fieldOfView = 48f;
             sceneCamera.nearClipPlane = .1f;
             sceneCamera.farClipPlane = 160f;
@@ -59,9 +73,15 @@ public sealed class CampaignStage25D : MonoBehaviour
         playerWalkB = LoadSprite("Player_Walk_B");
         guardSprite = LoadSprite("Guard_Idle");
         armedGuardSprite = LoadSprite("Guard_Armed");
-        redLightBackdrop = LoadBackground("Fondo_Luz_Roja", FilterMode.Bilinear);
-        campaignTugBackdrop = LoadBackground("Fondo_Tug_Campana", FilterMode.Bilinear);
-        roomBackdrop = LoadBackground("Fondo_Cuartos", FilterMode.Bilinear);
+        characterArt = new ArenaCharacterArt();
+        sandstone=MakeMaterial(new Color(.78f,.62f,.40f));
+        terracotta=MakeMaterial(new Color(.57f,.24f,.16f));
+        trackSoil=MakeMaterial(new Color(.85f,.71f,.5f));
+        aggregate=SurfacePrint(false); floorTiles=SurfacePrint(true);
+        trackSoil.SetTexture("_BaseMap",aggregate);
+        trackSoil.SetTextureScale("_BaseMap",new Vector2(9,29));
+        floorMat.SetTexture("_BaseMap",floorTiles);
+        floorMat.SetTextureScale("_BaseMap",new Vector2(9,10));
         dollFrames = LoadDollFrames();
         if (stageRoot == null)
         {
@@ -75,71 +95,68 @@ public sealed class CampaignStage25D : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (carouselCanopy != null) Destroy(carouselCanopy);
         if (stageRoot != null) Destroy(stageRoot.gameObject);
-        Material[] materials = { floorMat, roomFloorMat, wallMat, darkMat, greenMat, grassMat, redMat, pinkMat, blueMat, glassMat, goldMat, whiteMat, woodMat, skinMat };
+        characterArt?.Dispose();
+        Destroy(aggregate); Destroy(floorTiles); Destroy(trackSoil);
+        Material[] materials = { floorMat, roomFloorMat, wallMat, darkMat, greenMat, grassMat, redMat, pinkMat, blueMat, glassMat, goldMat, whiteMat, woodMat, skinMat, sandstone, terracotta };
         foreach (Material material in materials) if (material != null) Destroy(material);
-        Sprite[] sprites = { playerSprite, playerWalkA, playerWalkB, guardSprite, armedGuardSprite, redLightBackdrop, campaignTugBackdrop, roomBackdrop };
+        Sprite[] sprites = { playerSprite, playerWalkA, playerWalkB, guardSprite, armedGuardSprite };
         foreach (Sprite sprite in sprites) if (sprite != null) Destroy(sprite);
         if (dollFrames != null) foreach (Sprite sprite in dollFrames) if (sprite != null) Destroy(sprite);
     }
 
     public void Present(int screen, int trial, int humanCount, float phase, float progress, float progress2, bool greenLight,
         int shotVictim, float jumpOne, float jumpTwo, bool movingOne, bool movingTwo, Vector2 playerOne, Vector2 playerTwo, Vector2[] bots,
-        bool[] playerAlive, bool[] botAlive, bool trust, bool betrayed)
+        bool[] playerAlive, bool[] botAlive, bool[] bridgeSide, bool[] nightHostile, bool[] knownGlass, bool[,] safeBridge)
     {
-        trial = Mathf.Clamp(trial, 0, 3);
-        if (screen != lastScreen || trial != lastTrial) BuildStage(screen, trial);
+        trial = Mathf.Clamp(trial, 0, Final);
+        rosterSlots = 2 + botAlive.Length;
+        if (trial==lastTrial && IsTrialSet(screen) && IsTrialSet(lastScreen))
+            lastScreen=screen;
+        else if (screen != lastScreen || trial != lastTrial)
+        {
+            if(trial==Tug)
+            {
+                int left=humanCount,right=0;
+                for(int i=0;i<botAlive.Length;i++) if(botAlive[i]) { if(i%2==0)left++;else right++; }
+                tugEnd=Mathf.Max(6.3f,2.1f+1.28f*(Mathf.Max(left,right)-1));
+            }
+            BuildStage(screen, trial);
+        }
         if (sceneCamera != null)
         {
-            Vector3 target = trial == Tug ? new Vector3(0f, 2.4f, 1.5f) : new Vector3(0f, 1.3f, 1.5f);
-            bool followPlayer = screen == Round && (trial == RedLight || trial == Final);
-            if (followPlayer && trial == RedLight)
-                target.z = RedLightTrackZ(progress) + 3.5f;
-            else if (followPlayer && trial == Final)
-            {
-                target.x = Mathf.Clamp(playerOne.x / 55f, -8.3f, 8.1f) * .62f;
-                target.z += Mathf.Clamp(playerOne.y / 20f, -5.8f, 7f) * .55f;
-            }
-            AimCamera(target, followPlayer);
+            FrameArena(screen, trial, phase, humanCount, progress, progress2, playerOne, playerTwo);
         }
-        UpdateActors(screen, trial, humanCount, phase, progress, progress2, greenLight, shotVictim, jumpOne, jumpTwo, movingOne, movingTwo,
-            playerOne, playerTwo, bots, playerAlive, botAlive, trust, betrayed);
+        UpdateActors(screen == Interlude ? Round : screen, trial, humanCount, phase, progress, progress2, greenLight, shotVictim, jumpOne, jumpTwo, movingOne, movingTwo,
+            playerOne, playerTwo, bots, playerAlive, botAlive, bridgeSide, nightHostile, knownGlass, safeBridge);
     }
+
+    private static bool IsTrialSet(int screen) => screen==Round || screen==Result || screen==GameOver || screen==Interlude;
 
     private void BuildStage(int screen, int trial)
     {
         lastScreen = screen;
         lastTrial = trial;
-        if (cameraBackdrop != null) Destroy(cameraBackdrop);
-        cameraBackdrop = null;
+        carouselPlatform = null;
+        cutaway.Clear();
+        poses.Clear();
+        signalLamp=null;
+        cameraReady=false;
         foreach (Transform child in stageRoot) Destroy(child.gameObject);
         actors.Clear(); bridgeLeft.Clear(); bridgeRight.Clear(); ropeMarker = doll = van = null; dollRenderer = null;
         shotTrail = tugRope = tugRopeFiberA = tugRopeFiberB = null;
+        ArenaView.KeyLight(stageRoot);
         AddLight("Stage Key Light", new Vector3(-5f, 11f, -7f), 1.15f, 15f);
         AddLight("Warm Fill", new Vector3(6f, 8f, 5f), .75f, 11f);
         if (screen == Kidnap) { BuildKidnap(); return; }
-        if (screen == Round)
-        {
-            switch (trial)
-            {
-                case RedLight: BuildRedLight(); break;
-                case Tug: BuildTug(); break;
-                case Bridge: BuildBridge(); break;
-                default: BuildFinal(); break;
-            }
-        }
+        if (screen == Round || screen == Interlude) BuildTrial(trial);
+        else if (screen == Vote) BuildDormitory();
         else if (screen == Insider || screen == Betrayal) BuildNarrativeRoom(screen);
         else if (screen == Result || screen == GameOver) BuildTrial(trial);
         else if (screen == Ending) BuildFinal();
         else BuildLobby();
 
-        if (sceneCamera != null)
-        {
-            Sprite image = null;
-            if (trial == RedLight && (screen == Round || screen == Result || screen == GameOver)) image = redLightBackdrop;
-            else if (trial == Tug && (screen == Round || screen == Result || screen == GameOver)) image = campaignTugBackdrop;
-            if (image != null) ApplyCameraBackdrop(image);
-        }
     }
 
     private void BuildTrial(int trial)
@@ -147,6 +164,9 @@ public sealed class CampaignStage25D : MonoBehaviour
         switch (trial)
         {
             case RedLight: BuildRedLight(); break;
+            case Cookie: BuildCookieRoom(); break;
+            case Carousel: BuildCarousel(); break;
+            case Night: BuildDormitory(); break;
             case Tug: BuildTug(); break;
             case Bridge: BuildBridge(); break;
             default: BuildFinal(); break;
@@ -158,8 +178,8 @@ public sealed class CampaignStage25D : MonoBehaviour
         sceneCamera.backgroundColor = new Color(.025f, .035f, .075f);
         Box("Lobby Floor", new Vector3(0f, -.32f, 1f), new Vector3(20f, .6f, 25f), floorMat);
         Box("Back Wall", new Vector3(0f, 3.2f, 11.5f), new Vector3(20f, 7f, .6f), wallMat);
-        AddWallImage("Dormitory Background", new Vector3(0f, 3.2f, 11.08f), new Vector2(19.5f, 6.6f));
-        Box("Left Wall", new Vector3(-9.8f, 2.8f, 1f), new Vector3(.5f, 6f, 22f), wallMat);
+        PaintWall("Dormitory Background", new Vector3(0f, 3.2f, 11.08f), new Vector2(19.5f, 6.6f));
+        Box("Left Wall", new Vector3(-9.8f, .25f, 1f), new Vector3(.5f,.5f,22f), wallMat);
         Box("Right Wall", new Vector3(9.8f, 2.8f, 1f), new Vector3(.5f, 6f, 22f), wallMat);
         for (int i = 0; i < 8; i++)
         {
@@ -191,19 +211,21 @@ public sealed class CampaignStage25D : MonoBehaviour
     private void BuildRedLight()
     {
         sceneCamera.backgroundColor = new Color(.47f, .64f, .71f);
-        Box("Long Grass Field", new Vector3(0f, -.35f, 10f), new Vector3(18f, .7f, 58f), grassMat);
+        BuildCourtyard();
+        Box("Pista de albero", new Vector3(0f, -.35f, 10f), new Vector3(18f, .7f, 58f), trackSoil);
         Box("Left Track Boundary", new Vector3(-8.4f, .035f, 10f), new Vector3(.08f, .035f, 56f), whiteMat);
         Box("Right Track Boundary", new Vector3(8.4f, .035f, 10f), new Vector3(.08f, .035f, 56f), whiteMat);
         for (int lane = -1; lane <= 1; lane++)
             Box("Track Lane Divider " + lane, new Vector3(lane * 4.2f, .025f, 10f), new Vector3(.035f, .025f, 48f), whiteMat);
         Box("Start Line", new Vector3(0f, .04f, -12f), new Vector3(16.5f, .07f, .18f), whiteMat);
         Box("Finish Line", new Vector3(0f, .04f, 31f), new Vector3(16.5f, .07f, .2f), whiteMat);
-        Box("Finish Arch", new Vector3(0f, 3.5f, 33.5f), new Vector3(16f, .3f, .35f), pinkMat);
-        Box("Finish Arch Left Post", new Vector3(-7.9f, 1.8f, 33.5f), new Vector3(.32f, 3.5f, .35f), pinkMat);
-        Box("Finish Arch Right Post", new Vector3(7.9f, 1.8f, 33.5f), new Vector3(.32f, 3.5f, .35f), pinkMat);
-        Box("Doll Stand", new Vector3(0f, .45f, 37.5f), new Vector3(1.7f, .9f, 1.1f), woodMat);
+        if(leftTree!=null) Instantiate(leftTree,new Vector3(-3.6f,.0f,35.6f),Quaternion.identity,stageRoot);
+        if(rightTree!=null) Instantiate(rightTree,new Vector3(3.6f,.0f,36.6f),Quaternion.Euler(0,37f,0),stageRoot);
         BuildDoll();
-        for (int i = 0; i < 13; i++) actors.Add(Actor(false));
+        doll.transform.localRotation=Quaternion.Euler(0,ArenaView.Yaw,0);
+        Cylinder("Poste de señal",new Vector3(7.8f,.81f,31.2f),.10f,1.62f,darkMat);
+        signalLamp=Sphere("Semáforo de meta",new Vector3(7.8f,1.77f,31.2f),.4f,greenMat).GetComponent<Renderer>();
+        for (int i = 0; i < rosterSlots; i++) actors.Add(Actor(false));
         actors.Add(Actor(true)); actors.Add(Actor(true)); actors.Add(Actor(true));
         var trailObject = new GameObject("Guard Shot Trail"); trailObject.transform.SetParent(stageRoot, false);
         shotTrail = trailObject.AddComponent<LineRenderer>();
@@ -223,25 +245,28 @@ public sealed class CampaignStage25D : MonoBehaviour
         }
         for (int i = 0; i < 2; i++)
         {
-            float x = i == 0 ? -5f : 5f;
-            Box("Floating Team Platform", new Vector3(x, 2.4f, 1.5f), new Vector3(8.2f, .65f, 7.8f), i == 0 ? blueMat : redMat);
+            float x = (i==0?-1:1)*(tugEnd+1.6f)*.5f;
+            Box("Floating Team Platform", new Vector3(x,2.4f,1.5f),new Vector3(tugEnd-.2f,.65f,4.6f),i==0?blueMat:redMat);
             for (int p = 0; p < 4; p++)
                 Cylinder("Platform Support", new Vector3(x - 2.8f + p * 1.85f, -1.1f, i == 0 ? -1f : 4f), .16f, 6f, whiteMat);
         }
+        ropeCenter = .5f; ropeSpeed = 0f;
         tugRope = CreateRopeLine("Tug Rope", .19f, new Color(.34f, .19f, .12f), woodMat);
         tugRopeFiberA = CreateRopeLine("Tug Rope Twist A", .045f, new Color(.61f, .39f, .23f), woodMat);
         tugRopeFiberB = CreateRopeLine("Tug Rope Twist B", .045f, new Color(.20f, .11f, .08f), woodMat);
         ropeMarker = Box("Rope Marker", new Vector3(0f, 4.15f, 1.5f), new Vector3(.34f, .52f, .38f), goldMat);
-        Box("Left Anchor", new Vector3(-9.2f, 3.6f, 1.5f), new Vector3(.6f, 3f, .7f), whiteMat);
-        Box("Right Anchor", new Vector3(9.2f, 3.6f, 1.5f), new Vector3(.6f, 3f, .7f), whiteMat);
-        for (int i = 0; i < 6; i++) actors.Add(Actor(false));
-        for (int i = 0; i < 6; i++) actors.Add(Actor(false));
+        for (int i=0;i<rosterSlots;i++) actors.Add(Actor(false));
     }
 
     private void BuildBridge()
     {
+        jumpStart=new Vector3[rosterSlots]; jumpEnd=new Vector3[rosterSlots]; jumpBlend=new float[rosterSlots];
         sceneCamera.backgroundColor = new Color(.012f, .018f, .055f);
+        Box("Bridge Departure",new Vector3(0,2.4f,-8.05f),new Vector3(5,.3f,2.1f),floorMat);
         Box("Bridge Void Base", new Vector3(0f, -5f, 3f), new Vector3(22f, .4f, 30f), darkMat);
+        Box("Desembarco",new Vector3(0,2.4f,10.0f),new Vector3(5,.4f,4),floorMat);
+        for(int lane=-1;lane<=1;lane+=2)
+            Box("Viga longitudinal",new Vector3(lane*2.12f,2.15f,1.1f),new Vector3(.16f,.18f,20),goldMat);
         for (int side = -1; side <= 1; side += 2)
             for (int i = 0; i < 5; i++)
                 Cylinder("Bridge Suspension Cable", new Vector3(side * 2.6f, 4.8f, -6f + i * 3.6f), .045f, 11f, glassMat);
@@ -249,10 +274,43 @@ public sealed class CampaignStage25D : MonoBehaviour
         {
             float z = -6f + i * 2.05f;
             GameObject left = Box("Left Glass Panel " + i, new Vector3(-1.05f, 2.4f, z), new Vector3(1.9f, .22f, 1.78f), glassMat);
-            GameObject right = Box("Right Glass Panel " + i, new Vector3(1.05f, 2.4f, z), new Vector3(1.9f, .22f, 1.78f), whiteMat);
+            GameObject right = Box("Right Glass Panel " + i, new Vector3(1.05f, 2.4f, z), new Vector3(1.9f, .22f, 1.78f), glassMat);
             bridgeLeft.Add(left); bridgeRight.Add(right);
         }
-        actors.Add(Actor(false)); actors.Add(Actor(false)); actors.Add(Actor(true)); actors.Add(Actor(true));
+        for (int i=0;i<rosterSlots;i++) actors.Add(Actor(false));
+    }
+
+    private void BuildCookieRoom()
+    {
+        BuildNarrativeRoom(Round);
+        for (int row = 0; row < 4; row++)
+        {
+            float z = -4.8f + row * 3.1f;
+            Box("Mesa de azúcar", new Vector3(0,.65f,z), new Vector3(15,.35f,1.4f), woodMat);
+            for (int seat = 0; seat < 8; seat++)
+                Cylinder("Lata de galleta", new Vector3(-6.3f + seat*1.8f,.88f,z), .4f,.1f,goldMat);
+        }
+        for (int i = 0; i < rosterSlots; i++) actors.Add(Actor(false));
+        actors.Add(Actor(true));
+        actors.Add(Actor(true));
+    }
+
+    private void BuildDormitory()
+    {
+        sceneCamera.backgroundColor = new Color(.08f,.10f,.18f);
+        Box("Dormitorio",new Vector3(0,-.3f,1),new Vector3(21,.6f,20),floorMat);
+        PaintWall("Mural",new Vector3(0,2.7f,10.02f),new Vector2(20,4.65f));
+        for (int side=-1;side<=1;side+=2)
+            for (int row=0;row<4;row++)
+            {
+                float x=8.5f*side,z=-5+row*4;
+                for (int level=0;level<2;level++)
+                    Box("Colchón",new Vector3(x,.5f+level*1.6f,z),new Vector3(1.8f,.24f,3.5f),blueMat);
+                for (int corner=0;corner<4;corner++)
+                    Box("Poste",new Vector3(x+(corner%2-.5f)*1.8f,1.3f,z+(corner/2-.5f)*3.5f),new Vector3(.11f,2.6f,.11f),whiteMat);
+            }
+        BuildWardDetails();
+        for(int i=0;i<rosterSlots;i++) actors.Add(Actor(false));
     }
 
     private void BuildFinal()
@@ -266,25 +324,31 @@ public sealed class CampaignStage25D : MonoBehaviour
             Box("Arena Banner", new Vector3(x, 5.5f, 10f), new Vector3(1.3f, .15f, .2f), i % 2 == 0 ? pinkMat : blueMat);
         }
         Box("Goal Gate", new Vector3(8f, 2.7f, -6.5f), new Vector3(.32f, 5.4f, .4f), goldMat);
-        Box("Goal Beam", new Vector3(6.9f, 5.2f, -6.5f), new Vector3(2.5f, .25f, .4f), goldMat);
-        for (int i = 0; i < 13; i++) actors.Add(Actor(false));
+        Box("Meta",new Vector3(7.36f,.055f,.1f),new Vector3(.25f,.065f,15.6f),goldMat);
+        Box("Pasarela de salida",new Vector3(9.3f,.035f,.2f),new Vector3(3,.065f,16),woodMat);
+        for(int lane=0;lane<5;lane++)
+            Box("Banda de salida",new Vector3(-3,.025f,-6+lane*3),new Vector3(7,.02f,.09f),whiteMat);
+        for (int i = 0; i < rosterSlots; i++) actors.Add(Actor(false));
     }
 
     private void BuildNarrativeRoom(int screen)
     {
         sceneCamera.backgroundColor = new Color(.018f, .024f, .05f);
         Box("Briefing Room Floor", new Vector3(0f, -.3f, 1f), new Vector3(19f, .6f, 21f), darkMat);
-        Box("Briefing Wall", new Vector3(0f, 3.3f, 9.6f), new Vector3(19f, 7f, .5f), wallMat);
-        AddWallImage("Briefing Room Background", new Vector3(0f, 3.3f, 9.22f), new Vector2(18.5f, 6.7f));
-        Box("Door Frame", new Vector3(6f, 2f, 9.1f), new Vector3(2f, 4f, .5f), pinkMat);
-        Box("Door Opening", new Vector3(6f, 1.8f, 8.8f), new Vector3(1.5f, 3.6f, .15f), darkMat);
-        actors.Add(Actor(false)); actors.Add(Actor(true)); actors.Add(Actor(true));
+        Box("Muro de obrador",new Vector3(-2.5f,2.5f,9.6f),new Vector3(14,5,.5f),wallMat);
+        PaintWall("Mural del obrador",new Vector3(-2.5f,2.5f,9.32f),new Vector2(13.6f,4.65f));
+        Box("Pavimento del corredor",new Vector3(6,.01f,11.2f),new Vector3(3.2f,.1f,5.6f),floorMat);
+        for(int side=-1;side<=1;side+=2)
+            Box("Jamba del corredor",new Vector3(6+side*1.55f,1.9f,11.2f),new Vector3(.25f,3.8f,5.6f),wallMat);
+        Box("Luz del acceso",new Vector3(6,3.7f,8.7f),new Vector3(3.35f,.2f,.3f),pinkMat);
+        if (screen != Round) { actors.Add(Actor(false)); actors.Add(Actor(true)); actors.Add(Actor(true)); }
     }
 
     private void UpdateActors(int screen, int trial, int humanCount, float phase, float progress, float progress2, bool greenLight,
         int shotVictim, float jumpOne, float jumpTwo, bool movingOne, bool movingTwo, Vector2 playerOne, Vector2 playerTwo, Vector2[] bots,
-        bool[] playerAlive, bool[] botAlive, bool trust, bool betrayed)
+        bool[] playerAlive, bool[] botAlive, bool[] bridgeSide, bool[] nightHostile, bool[] knownGlass, bool[,] safeBridge)
     {
+        if (HasCarousel) return;
         if (screen == Kidnap && van != null)
         {
             van.transform.position = new Vector3(Mathf.Lerp(-9f, 0f, Mathf.Clamp01(phase / 5f)), 0f, 2f);
@@ -293,21 +357,27 @@ public sealed class CampaignStage25D : MonoBehaviour
         }
         if ((screen == Round || screen == Result || screen == GameOver) && trial == RedLight)
         {
-            if (dollRenderer != null) dollRenderer.flipX = !greenLight;
+            if (signalLamp!=null) signalLamp.sharedMaterial=greenLight?greenMat:redMat;
             if (dollRenderer != null && dollFrames != null && dollFrames.Length > 0)
-                dollRenderer.sprite = dollFrames[Mathf.FloorToInt(animClock * 8f) % dollFrames.Length];
+            {
+                // Halfway through the sheet the doll has its back to the contestants.
+                float targetFrame = greenLight ? dollFrames.Length / 2 : 0;
+                dollFrame = Mathf.MoveTowards(dollFrame, targetFrame, Time.deltaTime * 24f);
+                dollRenderer.sprite = dollFrames[Mathf.RoundToInt(dollFrame)];
+            }
             if (actors.Count > 0) PlaceActor(actors[0], new Vector3(-2.3f, .05f, RedLightTrackZ(progress)), false, movingOne, 0f, IsAlive(playerAlive, 0), true);
             if (actors.Count > 1) PlaceActor(actors[1], new Vector3(2.3f, .05f, RedLightTrackZ(progress2)), false, movingTwo, 0f, IsAlive(playerAlive, 1), true);
             if (humanCount < 2 && actors.Count > 1) actors[1].SetActive(false);
-            for (int i = 2; i < 13 && i < actors.Count; i++)
+            actors[0].GetComponent<SpriteRenderer>().color = IsAlive(playerAlive,0)?new Color(.76f,1f,1f):Color.gray;
+            for (int i = 2; i < rosterSlots && i < actors.Count; i++)
             {
                 int botIndex = i - 2;
                 float botProgress = bots != null && botIndex < bots.Length ? bots[botIndex].x : 0f;
                 float x = RedLightBotLane(botIndex);
-                float z = RedLightTrackZ(botProgress) - (botIndex / 6) * 2.8f;
-                PlaceActor(actors[i], new Vector3(x, .05f, z), false, greenLight, 0f, IsAlive(botAlive, botIndex));
+                float z = Mathf.Lerp(-12f - (botIndex / 8)*1.4f,31f,botProgress/760f);
+                PlaceActor(actors[i], new Vector3(x, .05f, z), false, greenLight, 0f, IsAlive(botAlive, botIndex),true);
             }
-            for (int i = 13; i < actors.Count; i++) PlaceActor(actors[i], new Vector3(-5f + (i - 13) * 5f, .05f, 29.5f), true, shotVictim >= 0, 0f);
+            for (int i = rosterSlots; i < actors.Count; i++) PlaceActor(actors[i], new Vector3(-5f + (i - rosterSlots) * 5f, .05f, 29.5f), true, shotVictim >= 0, 0f);
             if (shotTrail != null)
             {
                 shotTrail.enabled = shotVictim >= 0;
@@ -318,49 +388,97 @@ public sealed class CampaignStage25D : MonoBehaviour
                     else if (shotVictim >= 2 && bots != null && shotVictim - 2 < bots.Length)
                     {
                         int bot = shotVictim - 2;
-                        shotTrail.SetPosition(1, new Vector3(RedLightBotLane(bot), .9f, RedLightTrackZ(bots[bot].x) - (bot / 6) * 2.8f));
+                        shotTrail.SetPosition(1, new Vector3(RedLightBotLane(bot), .9f, actors[shotVictim].transform.position.z));
                     }
                     else shotTrail.SetPosition(1, new Vector3(-2.3f, .9f, RedLightTrackZ(progress)));
                 }
             }
         }
+        else if ((screen == Round || screen == Result || screen == GameOver) && trial == Night)
+        {
+            for (int i=0;i<actors.Count;i++)
+            {
+                Vector2 pos=i==0?playerOne:i==1?playerTwo:bots[i-2];
+                PlaceActor(actors[i],new Vector3(pos.x,.05f,pos.y),false,i==0?movingOne:i==1?movingTwo:true,0f,
+                    i<2?i<humanCount:IsAlive(botAlive,i-2));
+                if(i<humanCount) actors[i].GetComponent<SpriteRenderer>().color=i==0?new Color(.76f,1f,1f):new Color(1,.94f,.72f);
+                else if(i>=2 && nightHostile[i-2]) actors[i].GetComponent<SpriteRenderer>().color=new Color(1,.78f,.50f);
+            }
+        }
+        else if ((screen == Round || screen == Result || screen == GameOver) && trial == Cookie)
+        {
+            for (int i = 0; i < rosterSlots; i++)
+            {
+                int seat = i < 2 ? i + 3 : i < 5 ? i - 2 : i;
+                Vector3 position = new Vector3(-6.3f + seat%8*1.8f,.05f,-3.8f + seat/8*3.1f);
+                PlaceActor(actors[i], position, false, false, 0, i < 2 ? i < humanCount : IsAlive(botAlive,i-2));
+            }
+            PlaceActor(actors[rosterSlots], new Vector3(-8.2f,.05f,0), true, false, 0);
+            PlaceActor(actors[rosterSlots+1], new Vector3(8.2f,.05f,0), true, false, 0);
+        }
         else if ((screen == Round || screen == Result || screen == GameOver) && trial == Tug)
         {
-            float markerT = Mathf.Lerp(.12f, .88f, Mathf.Clamp01(progress / 100f));
-            float sag = .12f + Mathf.Clamp01(1f - Mathf.Abs(progress - 50f) / 50f) * .15f;
-            float markerX = Mathf.Lerp(-4.9f, 4.9f, markerT);
+            float pullTarget = Mathf.Lerp(.88f,.12f,Mathf.Clamp01(progress/100f));
+            float markerT = ropeCenter = Mathf.SmoothDamp(ropeCenter,pullTarget,ref ropeSpeed,.17f);
+            float sag = .12f + Mathf.Clamp01(1f - Mathf.Abs(progress - 50f) / 50f) * .15f + Mathf.Min(.15f,Mathf.Abs(ropeSpeed)*.25f);
+            float markerX = Mathf.Lerp(-tugEnd,tugEnd,markerT);
             float markerY = RopeHeight(markerT, sag, animClock);
             if (ropeMarker != null) ropeMarker.transform.localPosition = new Vector3(markerX, markerY + .24f, 1.5f);
             UpdateRope(tugRope, sag, animClock, 0f, 0f);
             UpdateRope(tugRopeFiberA, sag, animClock, .085f, 1.2f);
             UpdateRope(tugRopeFiberB, sag, animClock, -.085f, 3.4f);
+            int leftRank=0,rightRank=0;
             for (int i = 0; i < actors.Count; i++)
             {
-                bool left = i < 6; int slot = left ? i : i - 6;
-                float lean = Mathf.Sin(animClock * 7f + slot * .4f) * .09f;
-                PlaceActor(actors[i], new Vector3(left ? -7f + slot * .9f : 7f - slot * .9f, 2.8f + lean, .5f + slot * .35f), false, Mathf.Sin(animClock * 7f + slot) > 0f, left ? -8f : 8f);
+                bool left=i<2 || i%2==0;
+                if(i<2?i>=humanCount:!IsAlive(botAlive,i-2)){actors[i].SetActive(false);continue;}
+                int rank=left?leftRank++:rightRank++;
+                float effort=Mathf.Sin(animClock*5.5f-rank*.12f);
+                float x=(1.65f+rank*1.28f+effort*.075f)*(left?-1:1);
+                PlaceActor(actors[i],new Vector3(x,2.76f,1.63f),false,false,0);
+                var sr=actors[i].GetComponent<SpriteRenderer>();
+                sr.sprite=effort>0?playerWalkA:playerWalkB;
+                sr.flipX=!left;
             }
         }
         else if ((screen == Round || screen == Result || screen == GameOver) && trial == Bridge)
         {
             for (int i = 0; i < actors.Count; i++)
             {
-                int step = i == 0 ? Mathf.Clamp(Mathf.RoundToInt(progress), 0, 8) : i == 1 ? Mathf.Clamp(Mathf.RoundToInt(progress2), 0, 8) : Mathf.Min(8, Mathf.FloorToInt(phase * .12f));
-                PlaceActor(actors[i], new Vector3(i % 2 == 0 ? -1.05f : 1.05f, 2.57f, -6f + step * 2.05f), false, i >= 2, 0f);
+                int step = Mathf.Clamp(Mathf.RoundToInt(i==0 ? progress : i==1 ? progress2 : bots[i-2].x),0,8);
+                float side = i<2 ? (bridgeSide[i]?1:-1) : bots[i-2].y>.5f?1:-1;
+                float offset = i<2?0f:((i-2)%5-2)*.23f;
+                Vector3 landing=new Vector3(side+offset,2.57f,-8.05f+step*2.05f);
+                if(jumpEnd[i]!=landing)
+                {
+                    bool first=jumpEnd[i]==Vector3.zero;
+                    jumpStart[i]=first?landing:actors[i].transform.position;
+                    jumpEnd[i]=landing;
+                    jumpBlend[i]=first?1f:0f;
+                }
+                jumpBlend[i]=Mathf.MoveTowards(jumpBlend[i],1f,Time.deltaTime*3.7f);
+                float t=jumpBlend[i];
+                var feet=Vector3.Lerp(jumpStart[i],landing,t)+Vector3.up*(3.8f*t*(1-t));
+                PlaceActor(actors[i],feet,false,t<1,0f,i<2?i<humanCount:IsAlive(botAlive,i-2));
             }
         }
         else if ((screen == Round || screen == Result || screen == GameOver || screen == Ending) && trial == Final)
         {
             float leapOne = jumpOne > 0f ? Mathf.Sin(Mathf.Clamp01(1f - jumpOne / .58f) * Mathf.PI) * 1.25f : 0f;
             float leapTwo = jumpTwo > 0f ? Mathf.Sin(Mathf.Clamp01(1f - jumpTwo / .58f) * Mathf.PI) * 1.25f : 0f;
-            if (actors.Count > 0) PlaceActor(actors[0], new Vector3(Mathf.Clamp(playerOne.x / 55f, -8.3f, 8.1f), .05f + leapOne, Mathf.Clamp(playerOne.y / 20f, -5.8f, 7f)), false, movingOne, 0f, IsAlive(playerAlive, 0), true);
-            if (actors.Count > 1) PlaceActor(actors[1], new Vector3(Mathf.Clamp(playerTwo.x / 55f, -8.3f, 8.1f), .05f + leapTwo, Mathf.Clamp(playerTwo.y / 20f, -5.8f, 7f)), false, movingTwo, 0f, IsAlive(playerAlive, 1), true);
+            if (actors.Count > 0) PlaceActor(actors[0], new Vector3(Mathf.Clamp(playerOne.x / 55f, -8.3f, 8.1f), .05f + leapOne, Mathf.Clamp(playerOne.y / 26f, -6.75f, 6.75f)), false, movingOne, 0f, IsAlive(playerAlive, 0), true);
+            if (actors.Count > 1) PlaceActor(actors[1], new Vector3(Mathf.Clamp(playerTwo.x / 55f, -8.3f, 8.1f), .05f + leapTwo, Mathf.Clamp(playerTwo.y / 26f, -6.75f, 6.75f)), false, movingTwo, 0f, IsAlive(playerAlive, 1), true);
             if (humanCount < 2 && actors.Count > 1) actors[1].SetActive(false);
+            actors[0].GetComponent<SpriteRenderer>().color = IsAlive(playerAlive,0)?new Color(.76f,1f,1f):Color.gray;
             for (int i = 2; i < actors.Count; i++)
             {
                 Vector2 pos = bots != null && bots.Length > 0 ? bots[(i - 2) % bots.Length] : Vector2.zero;
-                PlaceActor(actors[i], new Vector3(Mathf.Clamp(pos.x / 55f, -8.3f, 8.1f), .05f, Mathf.Clamp(pos.y / 20f, -5.8f, 7f)), false, true, 0f);
+                PlaceActor(actors[i], new Vector3(Mathf.Clamp(pos.x / 55f, -8.3f, 8.1f), .05f, Mathf.Clamp(pos.y / 26f, -6.75f, 6.75f)), false, true, 0f, IsAlive(botAlive,i-2));
             }
+        }
+        else if (screen == Vote)
+        {
+            for(int i=0;i<actors.Count;i++) PlaceActor(actors[i],new Vector3(-6f+(i%8)*1.7f,.05f,-4f+(i/8)*2.3f),false,false,0,i<2?i<humanCount:IsAlive(botAlive,i-2));
         }
         else if (screen != Round)
         {
@@ -375,13 +493,11 @@ public sealed class CampaignStage25D : MonoBehaviour
         {
             for (int i = 0; i < bridgeLeft.Count; i++)
             {
-                bridgeLeft[i].transform.localScale = new Vector3(1.9f, .22f, 1.78f);
-                bridgeRight[i].transform.localScale = new Vector3(1.9f, .22f, 1.78f);
-                if (i < Mathf.Max(progress, progress2))
-                {
-                    SetMaterial(bridgeLeft[i], greenMat);
-                    SetMaterial(bridgeRight[i], greenMat);
-                }
+                if (!knownGlass[i]) continue;
+                GameObject safe = safeBridge[i, 0] ? bridgeLeft[i] : bridgeRight[i];
+                GameObject cracked = safeBridge[i, 0] ? bridgeRight[i] : bridgeLeft[i];
+                SetMaterial(safe, greenMat);
+                SetMaterial(cracked, redMat);
             }
         }
     }
@@ -389,11 +505,15 @@ public sealed class CampaignStage25D : MonoBehaviour
     private void BuildDoll()
     {
         var pivot = new GameObject("Doll Turning Pivot");
-        pivot.transform.SetParent(stageRoot, false); pivot.transform.localPosition = new Vector3(0f, 0f, 37.5f);
+        pivot.transform.SetParent(stageRoot,false);pivot.transform.localPosition=new Vector3(0,.04f,34.6f);
         doll = pivot;
         pivot.transform.localScale = Vector3.one * 1.5f;
         dollRenderer = pivot.AddComponent<SpriteRenderer>();
-        if (dollFrames != null && dollFrames.Length > 0) dollRenderer.sprite = dollFrames[0];
+        if (dollFrames != null && dollFrames.Length > 0)
+        {
+            dollFrame = dollFrames.Length / 2;
+            dollRenderer.sprite = dollFrames[(int)dollFrame];
+        }
         dollRenderer.sortingOrder = 24;
     }
 
@@ -425,34 +545,29 @@ public sealed class CampaignStage25D : MonoBehaviour
         if (actor == null) return;
         actor.SetActive(alive || showDead);
         if (!alive && !showDead) return;
-        actor.transform.localPosition = position;
-        if (alive && !walking) actor.transform.localPosition += Vector3.up * Mathf.Sin(animClock * 2.6f + position.x * .7f) * .018f;
-        actor.transform.localRotation = Quaternion.Euler(0f, yaw, alive ? 0f : 78f);
-        var renderer = actor.GetComponent<SpriteRenderer>();
-        if (renderer == null) return;
-        renderer.sprite = guard ? armedGuardSprite : walking ? ((Mathf.FloorToInt(animClock * 9f) & 1) == 0 ? playerWalkA : playerWalkB) : playerSprite;
-        renderer.color = alive ? Color.white : new Color(.52f, .52f, .56f);
-        renderer.sortingOrder = Mathf.RoundToInt((20f - position.z) * 2f);
+        if (!poses.TryGetValue(actor,out var pose))
+        {
+            pose=new ArenaCharacterPose();
+            poses.Add(actor,pose);
+        }
+        float floor=lastTrial==Final?.05f:lastTrial==Bridge?2.57f:position.y;
+        pose.Draw(actor.transform,position,floor,alive,walking,guard,yaw,Time.deltaTime,characterArt,playerSprite,playerWalkA,playerWalkB,armedGuardSprite);
     }
 
     private static bool IsAlive(bool[] states, int index) => states == null || index >= states.Length || states[index];
 
     private static float RedLightTrackZ(float progress) => Mathf.Lerp(-12f, 31f, Mathf.Clamp01(progress / 760f));
 
-    private static float RedLightBotLane(int botIndex) => ((botIndex % 6) - 2.5f) * 2.35f;
+    private static float RedLightBotLane(int botIndex) => ((botIndex % 8) - 3.5f) * 2.1f;
 
-    private void AimCamera(Vector3 target, bool smooth = false)
+    private void AimCamera(Vector3 target, bool smooth = false, float framing = 1f)
     {
-        Vector3 desiredPosition = target + new Vector3(0f, 9.2f, -21f);
-        if (smooth && cameraReady)
-            sceneCamera.transform.position = Vector3.SmoothDamp(sceneCamera.transform.position, desiredPosition, ref cameraVelocity, .32f);
-        else
-        {
-            sceneCamera.transform.position = desiredPosition;
-            cameraVelocity = Vector3.zero;
-        }
-        sceneCamera.transform.rotation = Quaternion.LookRotation(target - sceneCamera.transform.position, Vector3.up);
-        cameraReady = true;
+        var dest=target-ArenaView.Rotation*Vector3.forward*36f;
+        sceneCamera.transform.SetPositionAndRotation(smooth && cameraReady ?
+            Vector3.SmoothDamp(sceneCamera.transform.position,dest,ref cameraVelocity,.20f) : dest,ArenaView.Rotation);
+        sceneCamera.orthographicSize=smooth && cameraReady ? Mathf.SmoothDamp(sceneCamera.orthographicSize,framing,ref sizeVelocity,.22f) : framing;
+        sceneCamera.transparencySortMode=TransparencySortMode.Orthographic;
+        cameraReady=true;
     }
 
     private LineRenderer CreateRopeLine(string objectName, float width, Color color, Material material)
@@ -475,17 +590,17 @@ public sealed class CampaignStage25D : MonoBehaviour
     private static float RopeHeight(float t, float sag, float clock)
     {
         float bow = 4f * t * (1f - t);
-        return 4.3f - bow * sag + Mathf.Sin(t * Mathf.PI * 3f + clock * 5f) * .025f * bow;
+        return 3.57f - bow * sag + Mathf.Sin(t * Mathf.PI * 3f + clock * 5f) * .025f * bow;
     }
 
-    private static void UpdateRope(LineRenderer line, float sag, float clock, float strandOffset, float strandPhase)
+    private void UpdateRope(LineRenderer line, float sag, float clock, float strandOffset, float strandPhase)
     {
         if (line == null) return;
         const int points = 33;
         for (int i = 0; i < points; i++)
         {
             float t = i / (float)(points - 1);
-            float x = Mathf.Lerp(-4.9f, 4.9f, t);
+            float x = Mathf.Lerp(-tugEnd,tugEnd,t);
             float y = RopeHeight(t, sag, clock) + Mathf.Sin(t * Mathf.PI * 24f + clock * 4f + strandPhase) * strandOffset * .5f;
             float z = 1.5f + Mathf.Cos(t * Mathf.PI * 24f + clock * 4f + strandPhase) * strandOffset;
             line.SetPosition(i, new Vector3(x, y, z));
@@ -555,14 +670,6 @@ public sealed class CampaignStage25D : MonoBehaviour
         return texture != null ? Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(.5f, .05f), 100f) : null;
     }
 
-    private static Sprite LoadBackground(string name, FilterMode filterMode)
-    {
-        Texture2D texture = Resources.Load<Texture2D>("Backgrounds/" + name);
-        if (texture == null) return null;
-        texture.filterMode = filterMode;
-        return Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(.5f, .5f), 100f);
-    }
-
     private static Sprite[] LoadDollFrames()
     {
         var frames = new List<Sprite>();
@@ -574,30 +681,6 @@ public sealed class CampaignStage25D : MonoBehaviour
             frames.Add(Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(.5f, .025f), 64f));
         }
         return frames.ToArray();
-    }
-
-    private void ApplyCameraBackdrop(Sprite image)
-    {
-        cameraBackdrop = new GameObject("Camera Background Image");
-        cameraBackdrop.transform.SetParent(sceneCamera.transform, false);
-        cameraBackdrop.transform.localPosition = new Vector3(0f, 0f, 75f);
-        cameraBackdrop.transform.localRotation = Quaternion.identity;
-        cameraBackdrop.transform.localScale = new Vector3(120f, 68f, 1f);
-        var renderer = cameraBackdrop.AddComponent<SpriteRenderer>();
-        renderer.sprite = image;
-        renderer.sortingOrder = -1000;
-    }
-
-    private void AddWallImage(string objectName, Vector3 position, Vector2 size)
-    {
-        if (roomBackdrop == null) return;
-        var image = new GameObject(objectName);
-        image.transform.SetParent(stageRoot, false);
-        image.transform.localPosition = position;
-        image.transform.localScale = new Vector3(size.x, size.y, 1f);
-        var renderer = image.AddComponent<SpriteRenderer>();
-        renderer.sprite = roomBackdrop;
-        renderer.sortingOrder = -5;
     }
 
     private static void SetMaterial(GameObject item, Material material)

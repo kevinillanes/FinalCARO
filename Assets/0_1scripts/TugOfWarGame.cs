@@ -11,6 +11,20 @@ public sealed class TugOfWarGame : MonoBehaviour
 
     private float progress;
     private bool finished;
+    private RopePracticeStage stage;
+
+    private void Start()
+    {
+        stage=gameObject.AddComponent<RopePracticeStage>();
+        stage.Build(false,centerMarker);
+    }
+
+    private void OnGUI()
+    {
+        if (GUI.Button(new Rect(12,12,132,34),"Volver al menú"))
+            UnityEngine.SceneManagement.SceneManager.LoadScene("LaUltimaRonda");
+        if(instructionText!=null) GUI.Box(new Rect((Screen.width-530)*.5f,Screen.height-75,530,58),instructionText.text);
+    }
 
     private void Update()
     {
@@ -24,8 +38,9 @@ public sealed class TugOfWarGame : MonoBehaviour
 
         progress -= opponentPullPerSecond * Time.deltaTime;
         progress = Mathf.Clamp(progress, -winDistance, winDistance);
+        stage.DrawCable(0f,progress/winDistance);
         if (centerMarker != null)
-            centerMarker.position = new Vector3(progress, centerMarker.position.y, centerMarker.position.z);
+            centerMarker.position = new Vector3(-progress, centerMarker.position.y, centerMarker.position.z);
 
         if (instructionText == null) return;
         if (progress >= winDistance)

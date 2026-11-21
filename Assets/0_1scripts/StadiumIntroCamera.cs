@@ -3,73 +3,46 @@ using UnityEngine;
 [RequireComponent(typeof(Camera))]
 public sealed class StadiumIntroCamera : MonoBehaviour
 {
-    [Header("Entrada cinematográfica")]
     [SerializeField] private float introDuration = 6f;
-    [SerializeField] private Vector3 overviewPosition = new Vector3(0f, 59f, -127f);
-    [SerializeField] private Vector3 overviewLookAt = new Vector3(0f, 4f, 1f);
-    [SerializeField] private float overviewFieldOfView = 54f;
-
-    [Header("Cámara de juego")]
-    [SerializeField] private Vector3 followOffset = new Vector3(0f, 8f, -13f);
-    [SerializeField] private Vector3 followLookOffset = new Vector3(0f, 1f, 0f);
-    [SerializeField] private float followFieldOfView = 48f;
-    [SerializeField] private float followSmoothTime = 0.18f;
-    [SerializeField] private float rotationSharpness = 5f;
-
+    [SerializeField] private float followSmoothTime = .18f;
     private Transform player;
-    private Camera sceneCamera;
-    private Vector3 followVelocity;
+    private Camera view;
+    private Vector3 focus, velocity;
     private float elapsed;
-
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    private static void AttachToMainCamera()
-    {
-        Camera mainCamera = Camera.main;
-        if (mainCamera == null) mainCamera = Object.FindFirstObjectByType<Camera>();
-        if (mainCamera != null && !mainCamera.orthographic && mainCamera.GetComponent<StadiumIntroCamera>() == null)
-            mainCamera.gameObject.AddComponent<StadiumIntroCamera>();
-    }
-
+    private readonly RaycastHit[] hits=new RaycastHit[32];
+    private readonly System.Collections.Generic.HashSet<Renderer> covers=new System.Collections.Generic.HashSet<Renderer>();
     private void Start()
     {
-        sceneCamera = GetComponent<Camera>();
-        GameObject playerObject = GameObject.Find("Player");
-        if (playerObject == null)
+        view=GetComponent<Camera>();
+        view.orthographic=true;
+        view.clearFlags=CameraClearFlags.SolidColor;
+        view.backgroundColor=new Color(.075f,.11f,.16f);
+        var controller=FindAnyObjectByType<PlayerMovement>();
+        if(controller!=null) player=controller.transform;
+        // Cut the near walls and overhead slab, keeping their colliders and the rear elevation.
+        foreach(string label in new[]{"Techo azul","Revestimiento azul interior","Viga perimetral superior","Muro oeste","Muro de entrada","Fondo de los cuartos"})
         {
-            Debug.LogError("StadiumIntroCamera: no se encontró el objeto Player.");
-            enabled = false;
-            return;
+            var part=GameObject.Find(label);
+            if(part!=null && part.TryGetComponent<Renderer>(out var r)) r.enabled=false;
         }
-
-        player = playerObject.transform;
-        transform.position = overviewPosition;
-        transform.LookAt(overviewLookAt);
-        sceneCamera.fieldOfView = overviewFieldOfView;
+        view.farClipPlane=400;
     }
-
     private void LateUpdate()
     {
-        if (player == null) return;
-
-        elapsed += Time.deltaTime;
-        float progress = Mathf.Clamp01(elapsed / Mathf.Max(0.1f, introDuration));
-        float easedProgress = progress * progress * (3f - 2f * progress);
-        Vector3 destination = player.position + followOffset;
-        Vector3 lookTarget = player.position + followLookOffset;
-
-        if (progress < 1f)
+        if(player==null) return;
+        elapsed+=Time.deltaTime;
+        float t=Mathf.SmoothStep(0,1,elapsed/Mathf.Max(.1f,introDuration));
+        focus=Vector3.SmoothDamp(focus,Vector3.Lerp(Vector3.zero,player.position,t),ref velocity,followSmoothTime);
+        view.orthographicSize=Mathf.Lerp(Mathf.Max(55,90/view.aspect),Mathf.Max(12,17/view.aspect),t);
+        transform.SetPositionAndRotation(focus-ArenaView.Rotation*Vector3.forward*Mathf.Lerp(170,38,t),ArenaView.Rotation);
+        foreach(var cover in covers) if(cover!=null) cover.forceRenderingOff=false;
+        covers.Clear();
+        int count=Physics.RaycastNonAlloc(player.position+Vector3.up*.55f,-transform.forward,hits,view.farClipPlane);
+        for(int i=0;i<count;i++)
         {
-            transform.position = Vector3.Lerp(overviewPosition, destination, easedProgress);
-            Vector3 introLookTarget = Vector3.Lerp(overviewLookAt, lookTarget, easedProgress);
-            transform.rotation = Quaternion.LookRotation(introLookTarget - transform.position, Vector3.up);
-            sceneCamera.fieldOfView = Mathf.Lerp(overviewFieldOfView, followFieldOfView, easedProgress);
-        }
-        else
-        {
-            transform.position = Vector3.SmoothDamp(transform.position, destination, ref followVelocity, followSmoothTime);
-            Quaternion targetRotation = Quaternion.LookRotation(lookTarget - transform.position, Vector3.up);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSharpness * Time.deltaTime);
-            sceneCamera.fieldOfView = followFieldOfView;
+            if(hits[i].transform.IsChildOf(player)) continue;
+            if(hits[i].collider.TryGetComponent<MeshRenderer>(out var cover) && cover.enabled)
+            { cover.forceRenderingOff=true; covers.Add(cover); }
         }
     }
 }

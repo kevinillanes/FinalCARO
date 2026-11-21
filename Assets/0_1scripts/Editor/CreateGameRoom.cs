@@ -211,17 +211,11 @@ public static class CreateGameRoom
         cameraObject.transform.position = new Vector3(0f, 21f, -59f);
         cameraObject.transform.LookAt(new Vector3(0f, 7f, 0f));
         Camera camera = cameraObject.GetComponent<Camera>();
-        camera.fieldOfView = 64f;
+        camera.orthographic=true;
+        camera.orthographicSize=58;
         camera.farClipPlane = 350f;
 
-        var intro = cameraObject.AddComponent<StadiumIntroCamera>();
-        var serializedIntro = new SerializedObject(intro);
-        serializedIntro.FindProperty("overviewPosition").vector3Value = new Vector3(0f, 21f, -59f);
-        serializedIntro.FindProperty("overviewLookAt").vector3Value = new Vector3(0f, 7f, 0f);
-        serializedIntro.FindProperty("introDuration").floatValue = 6f;
-        serializedIntro.FindProperty("followOffset").vector3Value = new Vector3(0f, 9f, -13f);
-        serializedIntro.FindProperty("followLookOffset").vector3Value = new Vector3(0f, 1f, 0f);
-        serializedIntro.ApplyModifiedPropertiesWithoutUndo();
+        cameraObject.AddComponent<StadiumIntroCamera>();
     }
 
     private static void CreateLighting(Transform parent)
