@@ -4,30 +4,14 @@ using UnityEngine.InputSystem;
 public sealed partial class PixelSurvivalGame
 {
     private const int CampaignBots=50;
-    private static readonly string[] ShapeNames={"Estrella","Círculo","Triángulo","Cuadrado"};
-    private readonly int[] shapeBag={0,1,2,3};
-    private int shapesLeft,cookieShape;
     private readonly float[] bandCenter=new float[2];
     private readonly bool[] tugAttempted=new bool[2];
     private readonly string[] tugFeedback=new string[2];
     private float tugBeat;
     private int tugBeatNumber;
 
-    private void PrepareTimingTrial()
+    private void PrepareTugTiming()
     {
-        if((Trial)trialIndex==Trial.Cookie)
-        {
-            if(shapesLeft==0)
-            {
-                for(int i=shapeBag.Length-1;i>0;i--)
-                {
-                    int j=Random.Range(0,i+1);
-                    (shapeBag[i],shapeBag[j])=(shapeBag[j],shapeBag[i]);
-                }
-                shapesLeft=shapeBag.Length;
-            }
-            cookieShape=shapeBag[--shapesLeft];
-        }
         tugBeat=0;
         tugBeatNumber=0;
         for(int p=0;p<humanCount;p++)
@@ -47,7 +31,6 @@ public sealed partial class PixelSurvivalGame
 
     private float Needle(int p)=>Mathf.PingPong(pulse[p],1);
     private float Band(int p)=>bandCenter[p]+.035f*Mathf.Sin(trialTime*2.4f+p);
-    private float CookieWidth(int p)=>.155f-.010f*cuts[p];
     private float TugWidth()=>Mathf.Lerp(.19f,.13f,Mathf.Clamp01(trialTime/32f));
     private bool TimingHit(int p,float width)=>Mathf.Abs(Needle(p)-Band(p))<=width*.5f;
 
@@ -83,6 +66,7 @@ public sealed partial class PixelSurvivalGame
             tugAttempted[p]=true;
             float width=TugWidth();
             bool hit=TimingHit(p,width),perfect=TimingHit(p,width*.34f);
+            stage25D.PlayTugPull(p,true,perfect?1f:hit?.75f:.24f);
             tugProgress+=(perfect?10f:hit?6.5f:-6f)/humanCount;
             tugFeedback[p]=perfect?"¡Perfecto!":hit?"Buen tirón":"Fuera de tiempo";
             Chime(perfect?1.7f:hit?1.25f:.6f);
@@ -90,6 +74,7 @@ public sealed partial class PixelSurvivalGame
         for(int i=0;i<rivalBots;i++)
         {
             if(!botRunnerAlive[i] || (botClock[i]-=dt)>0) continue;
+            stage25D.PlayTugPull(i+2,tugAllies[i],.36f);
             tugProgress+=(tugAllies[i]?1:-1)*(.22f+.32f*nerve[i]);
             botClock[i]=1.4f+(1f-craft[i])*.8f;
         }

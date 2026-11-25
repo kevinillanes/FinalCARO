@@ -9,11 +9,14 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         Carousel = (int)PixelSurvivalGame.Trial.Carousel, Night = (int)PixelSurvivalGame.Trial.Night,
         Tug = (int)PixelSurvivalGame.Trial.Tug, Bridge = (int)PixelSurvivalGame.Trial.Bridge, Rope = (int)PixelSurvivalGame.Trial.Rope, Final = (int)PixelSurvivalGame.Trial.Final;
     private int rosterSlots = 31;
+    private int rosterHumans = 1;
     private readonly List<GameObject> actors = new List<GameObject>();
     private Transform stageRoot;
     private Camera sceneCamera;
     private Material floorMat, roomFloorMat, wallMat, darkMat, greenMat, grassMat, redMat, pinkMat, blueMat, glassMat, goldMat, whiteMat, woodMat, skinMat;
-    private Sprite playerSprite, playerWalkA, playerWalkB, guardSprite, armedGuardSprite;
+    private readonly List<(SpriteRenderer image,CastSkin skin)> spectators=new List<(SpriteRenderer,CastSkin)>();
+    private float[] tugPullAt, tugEffort;
+    private float leftSurge, rightSurge;
     private Sprite[] dollFrames;
     private GameObject ropeMarker, doll, van;
     private ArenaCharacterArt characterArt;
@@ -69,11 +72,6 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         whiteMat = MakeMaterial(new Color(.82f, .87f, .90f));
         woodMat = MakeMaterial(new Color(.32f, .19f, .12f));
         skinMat = MakeMaterial(new Color(.91f, .69f, .48f));
-        playerSprite = LoadSprite("Player_Idle_A");
-        playerWalkA = LoadSprite("Player_Walk_A");
-        playerWalkB = LoadSprite("Player_Walk_B");
-        guardSprite = LoadSprite("Guard_Idle");
-        armedGuardSprite = LoadSprite("Guard_Armed");
         characterArt = new ArenaCharacterArt();
         sandstone=MakeMaterial(new Color(.78f,.62f,.40f));
         terracotta=MakeMaterial(new Color(.57f,.24f,.16f));
@@ -92,20 +90,25 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         BuildStage(Title, RedLight);
     }
 
-    private void LateUpdate() { animClock += Time.deltaTime; }
+    private void LateUpdate()
+    {
+        animClock+=Time.deltaTime;
+        for(int i=0;i<spectators.Count;i++)
+        {
+            var person=spectators[i];
+            person.image.sprite=characterArt.Frame(person.skin,CastMotion.Idle,1,(Mathf.FloorToInt(animClock*6)+i)%5);
+        }
+    }
 
     private void OnDestroy()
     {
         if (carouselCanopy != null) Destroy(carouselCanopy);
-        if (vipSprite != null) Destroy(vipSprite);
         if (bankGlass != null) Destroy(bankGlass);
         if (stageRoot != null) Destroy(stageRoot.gameObject);
         characterArt?.Dispose();
         Destroy(aggregate); Destroy(floorTiles); Destroy(trackSoil);
         Material[] materials = { floorMat, roomFloorMat, wallMat, darkMat, greenMat, grassMat, redMat, pinkMat, blueMat, glassMat, goldMat, whiteMat, woodMat, skinMat, sandstone, terracotta };
         foreach (Material material in materials) if (material != null) Destroy(material);
-        Sprite[] sprites = { playerSprite, playerWalkA, playerWalkB, guardSprite, armedGuardSprite };
-        foreach (Sprite sprite in sprites) if (sprite != null) Destroy(sprite);
         if (dollFrames != null) foreach (Sprite sprite in dollFrames) if (sprite != null) Destroy(sprite);
     }
 
@@ -114,6 +117,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         bool[] playerAlive, bool[] botAlive, bool[] bridgeSide, bool[] nightHostile, bool[] knownGlass, bool[,] safeBridge, bool[] tugTeams)
     {
         trial = Mathf.Clamp(trial, 0, Final);
+        rosterHumans = humanCount;
         tugAllies=tugTeams;
         bool rosterChanged=rosterSlots!=2+botAlive.Length;
         rosterSlots = 2 + botAlive.Length;
@@ -145,7 +149,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         lastTrial = trial;
         carouselPlatform = null;
         cutaway.Clear();
-        poses.Clear();
+        poses.Clear(); spectators.Clear();
         signalLamp=null;
         cameraReady=false;
         foreach (Transform child in stageRoot) { child.gameObject.SetActive(false); Destroy(child.gameObject); }
@@ -256,6 +260,10 @@ public sealed partial class CampaignStage25D : MonoBehaviour
             for (int p = 0; p < 4; p++)
                 Cylinder("Platform Support", new Vector3(x - 2.8f + p * 1.85f, -1.1f, i == 0 ? -1f : 4f), .16f, 6f, whiteMat);
         }
+        tugPullAt=new float[rosterSlots];
+        tugEffort=new float[rosterSlots];
+        System.Array.Fill(tugPullAt,-10f);
+        leftSurge=rightSurge=0;
         ropeCenter = .5f; ropeSpeed = 0f;
         tugRope = CreateRopeLine("Tug Rope", .19f, new Color(.34f, .19f, .12f), woodMat);
         tugRopeFiberA = CreateRopeLine("Tug Rope Twist A", .045f, new Color(.61f, .39f, .23f), woodMat);
@@ -406,6 +414,8 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         }
         else if ((screen == Round || screen == Result || screen == GameOver) && trial == Tug)
         {
+            leftSurge=Mathf.MoveTowards(leftSurge,0,Time.deltaTime*2.8f);
+            rightSurge=Mathf.MoveTowards(rightSurge,0,Time.deltaTime*2.8f);
             float pullTarget = Mathf.Lerp(.88f,.12f,Mathf.Clamp01(progress/100f));
             float markerT = ropeCenter = Mathf.SmoothDamp(ropeCenter,pullTarget,ref ropeSpeed,.17f);
             float sag = .12f + Mathf.Clamp01(1f - Mathf.Abs(progress - 50f) / 50f) * .15f + Mathf.Min(.15f,Mathf.Abs(ropeSpeed)*.25f);
@@ -421,11 +431,16 @@ public sealed partial class CampaignStage25D : MonoBehaviour
                 bool left=i<2 || tugAllies[i-2];
                 if(i<2?i>=humanCount:!IsAlive(botAlive,i-2)){actors[i].SetActive(false);continue;}
                 int rank=left?leftRank++:rightRank++;
-                float effort=Mathf.Sin(animClock*5.5f-rank*.12f);
-                float x=(1.65f+rank*1.28f+effort*.075f)*(left?-1:1);
+                float age=Time.time-tugPullAt[i];
+                float cycle=Mathf.Clamp01(age/.48f);
+                float lean=Mathf.Sin(cycle*Mathf.PI)*tugEffort[i];
+                float x=(1.65f+rank*1.28f+lean*.16f)*(left?-1:1);
                 PlaceActor(actors[i],new Vector3(x,2.76f,1.63f),false,false,0);
                 var sr=actors[i].GetComponent<SpriteRenderer>();
-                sr.sprite=effort>0?playerWalkA:playerWalkB;
+                int frame=cycle>=1?0:Mathf.FloorToInt(cycle*6);
+                if(tugEffort[i]<.3f) frame=cycle<.5f?1:0;
+                sr.sprite=characterArt.Frame(CastSkin.Green_Unarmed,CastMotion.Pull,1,frame,poses[actors[i]].Participant);
+                if(i<humanCount) sr.color=i==0?new Color(.76f,1,1):new Color(1,.94f,.72f);
                 sr.flipX=!left;
             }
         }
@@ -447,7 +462,7 @@ public sealed partial class CampaignStage25D : MonoBehaviour
                 jumpBlend[i]=Mathf.MoveTowards(jumpBlend[i],1f,Time.deltaTime*3.7f);
                 float t=jumpBlend[i];
                 var feet=Vector3.Lerp(jumpStart[i],landing,t)+Vector3.up*(3.8f*t*(1-t));
-                PlaceActor(actors[i],feet,false,t<1,0f,i<2?i<humanCount:IsAlive(botAlive,i-2));
+                PlaceActor(actors[i],feet,false,t<1,0f,i<2?i<humanCount:IsAlive(botAlive,i-2),jump:t<1?t:-1);
             }
         }
         else if ((trial == Final || trial == Rope) && (IsTrialSet(screen) || screen==Ending)) return;
@@ -497,36 +512,45 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         GameObject actor = new GameObject(guard ? "Red Guard Sprite" : "Green Player Sprite");
         actor.transform.SetParent(stageRoot, false);
         SpriteRenderer renderer = actor.AddComponent<SpriteRenderer>();
-        renderer.sprite = guard ? guardSprite : playerSprite;
+        renderer.sprite=characterArt.Frame(guard?CastSkin.Red_Unarmed:CastSkin.Green_Unarmed,CastMotion.Idle,1,0);
         renderer.sortingOrder = 10;
         actor.transform.localScale = Vector3.one * .72f;
         return actor;
     }
 
-    private GameObject SpriteActor(bool guard, Vector3 position, float height)
+    private GameObject SpriteActor(CastSkin skin, Vector3 position, float height)
     {
-        var actor = new GameObject(guard ? "Guard" : "Player");
+        var actor = new GameObject(skin.ToString());
         actor.transform.SetParent(stageRoot, false);
         actor.transform.localPosition = position;
         actor.transform.localScale = Vector3.one * (height / 2.1f);
         var renderer = actor.AddComponent<SpriteRenderer>();
-        renderer.sprite = guard ? guardSprite : playerSprite;
+        renderer.sprite=characterArt.Frame(skin,CastMotion.Idle,1,0);
+        spectators.Add((renderer,skin));
         renderer.sortingOrder = 12;
         return actor;
     }
 
-    private void PlaceActor(GameObject actor, Vector3 position, bool guard, bool walking, float yaw, bool alive = true, bool showDead = false)
+    private void PlaceActor(GameObject actor, Vector3 position, bool guard, bool walking, float yaw, bool alive = true, bool showDead = false,float jump=-1)
     {
         if (actor == null) return;
         actor.SetActive(alive || showDead);
         if (!alive && !showDead) return;
         if (!poses.TryGetValue(actor,out var pose))
         {
-            pose=new ArenaCharacterPose();
+            int slot=actors.IndexOf(actor);
+            CastSkin skin=CastSkin.Green_Unarmed;
+            if(guard) skin=lastTrial==RedLight && IsTrialSet(lastScreen) ? CastSkin.Red_Rifle :
+                (slot%2==0?CastSkin.Red_Pistol:CastSkin.Red_Unarmed);
+            else if((lastScreen==Welcome || lastTrial==Night) && slot%4==0) skin=CastSkin.Green_Flashlight;
+            bool usesRoster = IsTrialSet(lastScreen) || lastScreen == Welcome || lastScreen == Vote;
+            int number = guard ? 0 : usesRoster && slot >= 2 ? slot - 1 + rosterHumans : slot + 1;
+            if (number > 0) actor.name = $"Participante {number:000}";
+            pose=new ArenaCharacterPose(skin,number);
             poses.Add(actor,pose);
         }
         float floor=lastTrial==Final?.05f:lastTrial==Rope?.94f:lastTrial==Bridge?2.57f:position.y;
-        pose.Draw(actor.transform,position,floor,alive,walking,guard,yaw,Time.deltaTime,characterArt,playerSprite,playerWalkA,playerWalkB,armedGuardSprite);
+        pose.Draw(actor.transform,position,floor,alive,walking,yaw,characterArt,jump);
     }
 
     private static bool IsAlive(bool[] states, int index) => states == null || index >= states.Length || states[index];
@@ -562,10 +586,27 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         return line;
     }
 
-    private static float RopeHeight(float t, float sag, float clock)
+    public void PlayTugPull(int slot,bool left,float strength)
+    {
+        if(lastTrial!=Tug || tugRope==null || tugPullAt==null || slot>=tugPullAt.Length) return;
+        tugPullAt[slot]=Time.time;
+        tugEffort[slot]=strength;
+        if(left) leftSurge=Mathf.Max(leftSurge,strength); else rightSurge=Mathf.Max(rightSurge,strength);
+        if(slot>=2 || strength<.55f) return;
+        int rank=0;
+        for(int i=0;i<tugAllies.Length;i++)
+            if(tugAllies[i] && actors[i+2].activeSelf)
+            {
+                tugPullAt[i+2]=Time.time+.018f*Mathf.Min(rank++,12);
+                tugEffort[i+2]=strength;
+            }
+    }
+
+    private float RopeHeight(float t, float sag, float clock)
     {
         float bow = 4f * t * (1f - t);
-        return 3.57f - bow * sag + Mathf.Sin(t * Mathf.PI * 3f + clock * 5f) * .025f * bow;
+        float wave=leftSurge*Mathf.Sin(clock*16-t*9)+rightSurge*Mathf.Sin(clock*16-(1-t)*9);
+        return 3.44f + .085f*bow*wave - bow * sag*(1-.65f*Mathf.Max(leftSurge,rightSurge)) + Mathf.Sin(t * Mathf.PI * 3f + clock * 5f) * .025f * bow;
     }
 
     private void UpdateRope(LineRenderer line, float sag, float clock, float strandOffset, float strandPhase)
@@ -637,12 +678,6 @@ public sealed partial class CampaignStage25D : MonoBehaviour
         material.SetOverrideTag("RenderType", "Transparent");
         material.renderQueue = 3000;
         return material;
-    }
-
-    private static Sprite LoadSprite(string name)
-    {
-        Texture2D texture = Resources.Load<Texture2D>("Characters/" + name);
-        return texture != null ? Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(.5f, .05f), 100f) : null;
     }
 
     private static Sprite[] LoadDollFrames()

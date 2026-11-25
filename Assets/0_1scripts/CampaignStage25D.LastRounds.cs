@@ -2,7 +2,6 @@ using UnityEngine;
 
 public sealed partial class CampaignStage25D
 {
-    private Sprite vipSprite;
     private Material bankGlass;
     private LineRenderer swingRope;
     private GameObject[,] floorTiles3D;
@@ -82,7 +81,7 @@ public sealed partial class CampaignStage25D
             Box("Faja",Vector3.zero,new Vector3(.16f,.22f,.55f),goldMat,bundle);
         }
         for(int i=-1;i<=1;i++)
-            SpriteActor(true,new Vector3(i*3,.04f,7.2f),1.9f).transform.rotation=Quaternion.Euler(0,ArenaView.Yaw,0);
+            SpriteActor(i==0?CastSkin.Red_Unarmed:CastSkin.Red_Pistol,new Vector3(i*3,.04f,7.2f),1.9f).transform.rotation=Quaternion.Euler(0,ArenaView.Yaw,0);
     }
 
     private void BuildSwingDeck()
@@ -106,7 +105,7 @@ public sealed partial class CampaignStage25D
         for(int i=0;i<rosterSlots;i++) actors.Add(Actor(false));
     }
 
-    internal void ShowRopeRound(float phase,PixelSurvivalGame.RopeRider[] slots,int humans,bool[] players,bool[] bots)
+    internal void ShowRopeRound(float phase,PixelSurvivalGame.RopeRider[] slots,int humans,bool[] players,bool[] bots,float[] outAt)
     {
         if(swingRope==null || slots==null) return;
         float angle=(phase-.83f)*2*Mathf.PI;
@@ -128,7 +127,7 @@ public sealed partial class CampaignStage25D
             int place=slots[i].place;
             float x=columns==1?0:Mathf.Lerp(-7.25f,7.25f,(place%columns)/(float)(columns-1));
             var feet=new Vector3(x,.94f+slots[i].height,place/columns*.74f);
-            PlaceActor(actors[i],feet,false,false,0,i<2?i<humans && players[i]:bots[i-2]);
+            PlaceActor(actors[i],feet,false,false,0,i<2?i<humans && players[i]:bots[i-2],showDead:Time.time-outAt[i]<.7f,jump:slots[i].jumped?Mathf.InverseLerp(slots[i].jumpAt,1,phase):-1);
             if(i<humans) actors[i].GetComponent<SpriteRenderer>().color=i==0?Color.cyan:new Color(1,.88f,.55f);
         }
     }
@@ -148,21 +147,19 @@ public sealed partial class CampaignStage25D
         Box("Palco de los VIP",new Vector3(0,1.62f,6.5f),new Vector3(10.3f,.54f,2.8f),woodMat);
         Box("Terciopelo del palco",new Vector3(0,3.16f,7.87f),new Vector3(10.3f,3.2f,.28f),terracotta);
         Box("Balaustrada dorada",new Vector3(0,2.35f,5.18f),new Vector3(10.3f,.11f,.12f),goldMat);
-        if(vipSprite==null) vipSprite=LoadSprite("VIP_Negro");
         for(int i=0;i<4;i++)
         {
             float x=-3.6f+i*2.4f;
             Sphere("Lámpara de palco",new Vector3(x,4.22f,7.66f),.27f,goldMat);
             Box("Asiento",new Vector3(x,2.13f,6.65f),new Vector3(1.24f,.45f,1.1f),redMat);
-            var vip=SpriteActor(false,new Vector3(x,2.32f,6.47f),2.35f);
+            var vip=SpriteActor(i%2==0?CastSkin.Black_Unarmed:CastSkin.Black_Knife,new Vector3(x,2.32f,6.47f),2.35f);
             vip.name="VIP de traje negro";
-            vip.GetComponent<SpriteRenderer>().sprite=vipSprite;
             vip.transform.rotation=Quaternion.Euler(0,ArenaView.Yaw,0);
         }
         for(int i=0;i<rosterSlots;i++) actors.Add(Actor(false));
     }
 
-    internal void ShowFloor(PixelSurvivalGame.FloorRider[] riders,float[,] deadlines,float now,int humans,bool[] players,bool[] bots)
+    internal void ShowFloor(PixelSurvivalGame.FloorRider[] riders,float[,] deadlines,float now,int humans,bool[] players,bool[] bots,float[] outAt)
     {
         if(riders==null || floorTiles3D==null) return;
         for(int r=0;r<PixelSurvivalGame.FloorRows;r++)
@@ -186,7 +183,7 @@ public sealed partial class CampaignStage25D
             if(rider.airborne)
                 feet=Vector3.Lerp(FloorPoint(rider.row-1,rider.fromLane),feet,rider.travel)+Vector3.up*(1.4f*Mathf.Sin(Mathf.PI*rider.travel));
             feet.x+=i<2?-.18f:(i%3)*.16f;
-            PlaceActor(actors[i],feet,false,rider.airborne,0,i<2?i<humans && players[i]:bots[i-2]);
+            PlaceActor(actors[i],feet,false,rider.airborne,0,i<2?i<humans && players[i]:bots[i-2],showDead:Time.time-outAt[i]<.7f,jump:rider.airborne?rider.travel:-1);
             if(i<humans) actors[i].GetComponent<SpriteRenderer>().color=i==0?Color.cyan:new Color(1,.88f,.55f);
         }
     }

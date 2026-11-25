@@ -5,7 +5,22 @@ public sealed partial class PixelSurvivalGame
 {
     private float[] nerve, craft, botClock;
     private int[] botStep, cracks;
-    private readonly int[] cuts = new int[2], wounds = new int[2];
+    private readonly int[] wounds = new int[2];
+    private static readonly string[] ShapeNames = { "Estrella", "Círculo", "Triángulo", "Cuadrado" };
+    private readonly int[] shapeBag = { 0, 1, 2, 3 };
+    private int shapesLeft, cookieShape;
+    private const int CookieSteps = 240; // Divisible by every polygon's side count and by the five baked sections.
+    private const float CookieTolerance = 9f, CookieSeconds = 42f;
+    private const float CrackGrowth = .36f, FinalCrackHold = .85f;
+    private static readonly Rect CookieRect = new Rect(330, 144, 300, 300);
+    private readonly Vector2[] cookiePath = new Vector2[CookieSteps + 1];
+    private int cookiePlayer, cookieIndex, cookiePointerIndex;
+    private Vector2 lastCookiePointer;
+    private bool cookieTracing, cookieStarted, cookieSlipped;
+    private float cookieTimeLeft;
+    private readonly Vector2[][] cookieFractures = new Vector2[3][];
+    private readonly float[] fractureStart = new float[3];
+    private float cookieVisualTime;
     private readonly Texture2D[,] cookieFaces=new Texture2D[4,6];
     private readonly float[] pulse = new float[2], shield = new float[2], cooldown = new float[2];
     private readonly bool[] knownGlass = new bool[8];
@@ -37,6 +52,7 @@ public sealed partial class PixelSurvivalGame
     {
         if ((Trial)trialIndex == Trial.Tug)
         {
+            PrepareTugTiming();
             tugAllies = new bool[rivalBots];
             int allies = humanCount, opponents = 0;
             for (int i = 0; i < rivalBots; i++)
@@ -47,7 +63,7 @@ public sealed partial class PixelSurvivalGame
                 else opponents++;
             }
         }
-        if ((Trial)trialIndex == Trial.Cookie || (Trial)trialIndex == Trial.Tug) PrepareTimingTrial();
+        if ((Trial)trialIndex == Trial.Cookie) PrepareCookie();
         botClock = new float[rivalBots];
         botStep = new int[rivalBots];
         knockback = new Vector2[rivalBots];
@@ -56,7 +72,7 @@ public sealed partial class PixelSurvivalGame
         System.Array.Clear(knownGlass, 0, knownGlass.Length);
         for (int p = 0; p < 2; p++)
         {
-            cuts[p] = wounds[p] = 0;
+            wounds[p] = 0;
             cooldown[p] = shield[p] = pulse[p] = 0f;
             if ((Trial)trialIndex == Trial.Night) finalPosition[p] = new Vector2(-1.5f + 3f*p, -3f);
         }
@@ -132,7 +148,7 @@ public sealed partial class PixelSurvivalGame
         string line;
         switch ((Trial)trialIndex)
         {
-            case Trial.Cookie: line = phaseTime < 3f ? "El recuento termina. Bajo cada tapa de metal espera una figura de azúcar." : "Nerea: «Sigue la aguja. Tienes que acertar cinco veces sin partir la figura»."; break;
+            case Trial.Cookie: line = phaseTime < 3f ? "El recuento termina. Bajo cada tapa de metal espera una figura de azúcar." : "Nerea: «Empieza en la marca blanca. Arrastra el ratón por el surco hasta dar la vuelta. A la tercera grieta, la figura se rompe»."; break;
             case Trial.Carousel: line = phaseTime < 3f ? "Al otro lado del comedor se encienden las bombillas de un carrusel. Los guardias abren las puertas de colores." : "Nerea: «Mira cada puerta. Si marca dos de tres, solo cabe una persona más»."; break;
             case Trial.Night: line = phaseTime < 3f ? "Las bandejas vuelven vacías. Alguien ha escondido las raciones bajo una litera." : "Por los altavoces: «Esta noche los guardias harán el recuento desde fuera»."; break;
             case Trial.Tug: line = "Al amanecer, una cuerda reúne a los supervivientes. Esta vez solo cruzará el equipo que tire al mismo ritmo."; break;
@@ -151,7 +167,34 @@ public sealed partial class PixelSurvivalGame
         else if (++cracks[i+2] >= 3) botRunnerAlive[i] = false;
     }
 
-    private void UpdateCookie(Keyboard k,float dt)
+    private void PrepareCookie()
+    {
+        if (shapesLeft == 0)
+        {
+            for (int i = shapeBag.Length - 1; i > 0; i--)
+            {
+                int j = Random.Range(0, i + 1);
+                (shapeBag[i], shapeBag[j]) = (shapeBag[j], shapeBag[i]);
+            }
+            shapesLeft = shapeBag.Length;
+        }
+        cookieShape = shapeBag[--shapesLeft];
+        for (int i = 0; i <= CookieSteps; i++)
+            cookiePath[i] = CookieRect.center + CookiePoint(i / (float)CookieSteps) * (CookieRect.width / 180f);
+        BeginCookieTurn(0);
+    }
+
+    private void BeginCookieTurn(int player)
+    {
+        cookiePlayer = player;
+        cookieIndex = 0;
+        cookieTracing = cookieStarted = cookieSlipped = false;
+        cookieTimeLeft = CookieSeconds;
+        cookieVisualTime = 0f;
+        System.Array.Clear(cookieFractures, 0, cookieFractures.Length);
+    }
+
+    private void UpdateCookie(float dt)
     {
         for (int i = 0; i < rivalBots; i++)
         {
@@ -159,36 +202,178 @@ public sealed partial class PixelSurvivalGame
             CutBotCookie(i);
             botClock[i] = 1.8f - .6f*craft[i];
         }
-        for (int p = 0; p < humanCount; p++)
+        Mouse mouse = Mouse.current;
+        Vector2 pointer = mouse != null ? mouse.position.ReadValue() : Vector2.zero;
+        pointer.y = UnityEngine.Screen.height - pointer.y;
+        Vector2 origin = UiOrigin(out float scale);
+        StepCookieTurn((pointer - origin) / scale, mouse?.leftButton.wasPressedThisFrame == true,
+            mouse?.leftButton.isPressed == true, dt);
+    }
+
+    private void StepCookieTurn(Vector2 pointer, bool pressed, bool held, float dt)
+    {
+        cookieVisualTime += dt;
+        if (cracks[cookiePlayer] == cookieFractures.Length)
         {
-            if (cuts[p] >= 5) continue;
-            pulse[p] += dt * (.78f + .045f*cuts[p]);
-            if (!Pressed(k,p == 0 ? Key.Space : Key.Enter)) continue;
-            if (TimingHit(p,CookieWidth(p))) { cuts[p]++; Chime(1.15f+.1f*cuts[p]); }
-            else if (++cracks[p] >= 3) { CompleteTrial(false,"La tercera grieta partió la figura."); return; }
-            else Chime(.58f);
-            PickBand(p);
+            if (cookieVisualTime - fractureStart[2] >= FinalCrackHold)
+                CompleteTrial(false, $"La tercera grieta rompió la galleta de J{cookiePlayer + 1}.");
+            return;
         }
-        if (cuts[0] == 5 && (humanCount == 1 || cuts[1] == 5)) CompleteTrial(true,"La figura salió entera.");
-        else if (trialTime > 42f) CompleteTrial(false,"El guardia recogió las latas al sonar la campana.");
+        if (cookieStarted)
+        {
+            cookieTimeLeft -= dt;
+            if (cookieTimeLeft <= 0f)
+            {
+                CompleteTrial(false, $"Se acabó el tiempo de J{cookiePlayer + 1} antes de cerrar el contorno.");
+                return;
+            }
+        }
+        if (!held)
+        {
+            cookieTracing = false;
+            return;
+        }
+        if (!cookieTracing)
+        {
+            if (!pressed || Vector2.Distance(pointer, cookiePath[cookieIndex]) > CookieTolerance) return;
+            cookieTracing = cookieStarted = true;
+            cookieSlipped = false;
+            lastCookiePointer = pointer;
+            cookiePointerIndex = cookieIndex;
+            return;
+        }
+
+        // Validate the swept segment too: a fast drag across the centre cannot skip an edge.
+        int samples = Mathf.CeilToInt(Vector2.Distance(lastCookiePointer, pointer) / 3f);
+        for (int i = 1; i <= samples; i++)
+        {
+            Vector2 point = Vector2.Lerp(lastCookiePointer, pointer, i / (float)samples);
+            int nearest = cookiePointerIndex;
+            float distance = (point - cookiePath[nearest]).sqrMagnitude;
+            int last = Mathf.Min(cookiePointerIndex + 6, CookieSteps);
+            for (int j = Mathf.Max(0, cookiePointerIndex - 6); j <= last; j++)
+            {
+                float candidate = (point - cookiePath[j]).sqrMagnitude;
+                if (candidate >= distance) continue;
+                nearest = j;
+                distance = candidate;
+            }
+            if (distance > CookieTolerance * CookieTolerance)
+            {
+                cookieTracing = false;
+                cookieSlipped = true;
+                AddCookieFracture(cookiePath[nearest], point);
+                Chime(.58f);
+                return;
+            }
+            cookiePointerIndex = nearest;
+            cookieIndex = Mathf.Max(cookieIndex, nearest);
+            if (cookieIndex == CookieSteps)
+            {
+                if (cookiePlayer + 1 == humanCount)
+                    CompleteTrial(true, humanCount == 1 ? "La figura salió entera." : "Las dos figuras salieron enteras.");
+                else
+                {
+                    Chime(1.45f);
+                    BeginCookieTurn(cookiePlayer + 1);
+                }
+                return;
+            }
+        }
+        lastCookiePointer = pointer;
+    }
+
+    private void AddCookieFracture(Vector2 origin, Vector2 slip)
+    {
+        int index = cracks[cookiePlayer]++;
+        bool final = index == cookieFractures.Length - 1;
+        Vector2 radial = (origin - CookieRect.center).normalized;
+        float side = Vector2.Dot(slip-origin,Vector2.Perpendicular(radial)) >= 0f ? 1f : -1f;
+        if (index == 1) side = -side;
+        Vector2 direction = (final ? -radial : radial) + Vector2.Perpendicular(radial) * (.30f * side);
+        Vector2 rim = CookieRect.center + direction.normalized * (CookieRect.width * .47f);
+        Vector2 across = Vector2.Perpendicular((rim-origin).normalized) * side;
+        int segments = final ? 9 : 5;
+        var path = new Vector2[segments+1];
+        path[0] = origin;
+        for (int i=1; i<segments; i++)
+        {
+            float t = i/(float)segments;
+            float kink = (i%2==0 ? -1f : 1f)*Mathf.Sin(t*Mathf.PI)*(final ? 9f : 4f);
+            path[i] = Vector2.Lerp(origin,rim,t) + across*kink;
+        }
+        path[segments] = rim;
+        cookieFractures[index] = path;
+        fractureStart[index] = cookieVisualTime;
+    }
+
+    private void DrawCookieFractures()
+    {
+        if (Event.current.type != EventType.Repaint) return;
+        for (int i=0; i<cracks[cookiePlayer]; i++)
+        {
+            var path = cookieFractures[i];
+            float progress = Mathf.Clamp01((cookieVisualTime-fractureStart[i])/CrackGrowth);
+            float reach = (path.Length-1)*Mathf.Sqrt(progress);
+            for (int j=0; j<Mathf.CeilToInt(reach); j++)
+            {
+                Vector2 end = Vector2.Lerp(path[j],path[j+1],reach-j);
+                DrawSugarSplit(path[j],end,i==2 ? 4f : 2.8f);
+            }
+            // A finer branch opens behind the growing tip.
+            if (reach>2f)
+            {
+                Vector2 direction = path[2]-path[1];
+                Vector2 fork = path[2]+direction*.55f+Vector2.Perpendicular(direction)*.66f;
+                DrawSugarSplit(path[2],Vector2.Lerp(path[2],fork,reach-2f),1.7f);
+            }
+        }
+    }
+
+    private void DrawSugarSplit(Vector2 start, Vector2 end, float width)
+    {
+        Vector2 delta = end - start;
+        Matrix4x4 saved = GUI.matrix;
+        GUI.matrix = saved * Matrix4x4.TRS(start,Quaternion.Euler(0,0,Mathf.Atan2(delta.y,delta.x)*Mathf.Rad2Deg),Vector3.one);
+        Fill(new Rect(-.5f,-width*.5f,delta.magnitude+1f,width+1.2f),new Color(.99f,.75f,.38f));
+        Fill(new Rect(-.5f,-width*.5f,delta.magnitude+1f,width),new Color(.23f,.105f,.055f));
+        GUI.matrix = saved;
     }
 
     private void DrawCookie()
     {
-        Label(new Rect(80,98,800,55),$"{ShapeNames[cookieShape]} · Completa cinco tramos. Pulsa cuando la aguja entre en el verde.",bodyStyle);
-        Label(new Rect(350,155,260,32),Mathf.CeilToInt(42f-trialTime)+" s",smallStyle);
-        for (int p = 0; p < humanCount; p++)
+        bool broken = cracks[cookiePlayer] == cookieFractures.Length;
+        string hint = broken ? "La tercera grieta partió la figura."
+            : cookieTracing ? "Sigue los puntos del borde. Puedes soltar el botón y retomar en la marca blanca."
+            : cookieSlipped ? "¡Una grieta! Suelta el botón y vuelve a pulsar en la marca blanca."
+            : cookieStarted ? "Para continuar, mantén el botón izquierdo sobre la marca blanca y sigue el borde."
+            : cookiePlayer == 1 ? "¡J1 terminó! Pasa el ratón a J2. Mantén el clic en la marca blanca y sigue los puntos."
+            : "Mantén el botón izquierdo en la marca blanca y arrastra por el borde hacia los puntos.";
+        Fill(new Rect(48, 98, 864, 43), new Color(.035f, .055f, .085f, .96f));
+        Label(new Rect(55, 99, 850, 40), hint, smallStyle);
+
+        const int sectionSize = CookieSteps / 5;
+        GUI.DrawTexture(CookieRect, CookieFace(cookieIndex / sectionSize));
+        for (int i = cookieIndex / sectionSize * sectionSize; i < cookieIndex; i++)
+            CookieMark(cookiePath[i], 4f, new Color(.37f, .95f, .59f));
+        DrawCookieFractures();
+        if (!broken)
         {
-            float x = humanCount == 1 ? 480 : 305 + p*350;
-            GUI.DrawTexture(new Rect(x-90,175,180,180),CookieFace(cuts[p]));
-            if (cuts[p]<5)
-            {
-                Vector2 tip=CookiePoint((cuts[p]+Needle(p))/5f)+new Vector2(x,265);
-                Fill(new Rect(tip.x-4,tip.y-4,8,8),Color.white);
-            }
-            DrawBand(new Rect(x-110,380,220,18),p,CookieWidth(p));
-            Label(new Rect(x-165,410,330,55),$"J{p+1} · {(p==0?"ESPACIO":"ENTER")}   {cuts[p]}/5\nGrietas {cracks[p]}/3",smallStyle);
+            for (int i = 4; i <= 12 && cookieIndex + i <= CookieSteps; i += 4)
+                CookieMark(cookiePath[cookieIndex + i], 5f, new Color(.18f, .17f, .12f));
+            CookieMark(cookiePath[cookieIndex], 13f, new Color(.16f, .10f, .06f));
+            CookieMark(cookiePath[cookieIndex], 8f, Color.white);
         }
+
+        string turn = humanCount == 2 ? $"Turno de J{cookiePlayer + 1} de 2   ·   " : "";
+        Fill(new Rect(85, 450, 790, 42), new Color(.035f, .055f, .085f, .96f));
+        Label(new Rect(90, 451, 780, 40),
+            $"{turn}{ShapeNames[cookieShape]}   ·   {100 * cookieIndex / CookieSteps} %   ·   Grietas {cracks[cookiePlayer]}/3   ·   {Mathf.CeilToInt(cookieTimeLeft)} s", smallStyle);
+    }
+
+    private void CookieMark(Vector2 point, float size, Color color)
+    {
+        Fill(new Rect(point.x - size * .5f, point.y - size * .5f, size, size), color);
     }
 
     private Vector2 CookiePoint(float t)

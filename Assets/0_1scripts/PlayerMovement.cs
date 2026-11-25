@@ -9,31 +9,11 @@ public sealed class PlayerMovement : MonoBehaviour
     [SerializeField] private float fieldHalfLength = 28.5f;
 
     private CharacterController controller;
-    private ArenaCharacterArt art;
-    private ArenaCharacterPose pose;
-    private Transform portrait;
-    private Sprite idle,walkA,walkB;
-
     private void Awake()
     {
-        controller = GetComponent<CharacterController>();
-        idle=LoadPose("Player_Idle_A");walkA=LoadPose("Player_Walk_A");walkB=LoadPose("Player_Walk_B");
-        if(idle!=null && walkA!=null && walkB!=null)
-        {
-            foreach(var renderer in GetComponentsInChildren<MeshRenderer>()) renderer.enabled=false;
-            art=new ArenaCharacterArt();pose=new ArenaCharacterPose();
-            portrait=new GameObject("Participante").transform;portrait.SetParent(transform,false);
-            portrait.localScale=Vector3.one*1.15f;
-            portrait.gameObject.AddComponent<SpriteRenderer>();
-        }
+        controller=GetComponent<CharacterController>();
+        if(!TryGetComponent<WorldCastActor>(out _)) gameObject.AddComponent<WorldCastActor>();
     }
-
-    private static Sprite LoadPose(string label)
-    {
-        var tex=Resources.Load<Texture2D>("Characters/"+label);
-        return tex==null?null:Sprite.Create(tex,new Rect(0,0,tex.width,tex.height),new Vector2(.5f,.05f),100);
-    }
-    private void OnDestroy(){art?.Dispose(); if(idle!=null)Destroy(idle);if(walkA!=null)Destroy(walkA);if(walkB!=null)Destroy(walkB);}
 
     private void Update()
     {
@@ -52,10 +32,6 @@ public sealed class PlayerMovement : MonoBehaviour
         position.x = Mathf.Clamp(position.x, -fieldHalfWidth, fieldHalfWidth);
         position.z = Mathf.Clamp(position.z, -fieldHalfLength, fieldHalfLength);
         transform.position = position;
-        if(portrait!=null)
-        {
-            Vector3 feet=new Vector3(position.x,controller.bounds.min.y+.02f,position.z);
-            pose.Draw(portrait,feet,feet.y,true,movement.sqrMagnitude>.01f,false,0,Time.deltaTime,art,idle,walkA,walkB,null);
-        }
+
     }
 }

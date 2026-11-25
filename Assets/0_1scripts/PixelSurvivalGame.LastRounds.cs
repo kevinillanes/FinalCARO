@@ -17,7 +17,7 @@ public sealed partial class PixelSurvivalGame
         public bool airborne;
     }
 
-    private float[] bridgeFallAt;
+    private float[] bridgeFallAt, riderOutAt;
     private RopeRider[] ropeSlots;
     private FloorRider[] floorRiders;
     private float[,] tileDeadline;
@@ -31,6 +31,7 @@ public sealed partial class PixelSurvivalGame
 
     private void EliminateRider(int slot)
     {
+        riderOutAt[slot]=Time.time;
         if (slot < 2) { playerAlive[slot] = false; Chime(.56f); }
         else botRunnerAlive[slot-2] = false;
     }
@@ -56,6 +57,7 @@ public sealed partial class PixelSurvivalGame
 
     private void PrepareRopeRound()
     {
+        ResetEliminations();
         ropeTurn=0;
         ropeSlots=new RopeRider[2+rivalBots];
         int place=0;
@@ -127,8 +129,15 @@ public sealed partial class PixelSurvivalGame
         if(isPractice && GUI.Button(new Rect(12,12,122,31),"Volver al menú")) screen=Screen.Title;
     }
 
+    private void ResetEliminations()
+    {
+        riderOutAt=new float[2+rivalBots];
+        System.Array.Fill(riderOutAt,float.NegativeInfinity);
+    }
+
     private void PrepareFloor()
     {
+        ResetEliminations();
         tileDeadline=new float[FloorRows,FloorLanes];
         for(int row=0;row<FloorRows;row++)
             for(int lane=0;lane<FloorLanes;lane++) tileDeadline[row,lane]=float.PositiveInfinity;

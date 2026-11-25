@@ -133,8 +133,8 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
                 finalPosition, botPosition, botRunnerAlive, carouselPhase == CarouselPhase.Doors, playerMoving);
         if (screen == Screen.Round || screen == Screen.Interlude || screen == Screen.GameOver || screen == Screen.Result)
         {
-            if ((Trial)trialIndex == Trial.Rope) stage25D.ShowRopeRound(ropePhase, ropeSlots, humanCount, playerAlive, botRunnerAlive);
-            if ((Trial)trialIndex == Trial.Final) stage25D.ShowFloor(floorRiders, tileDeadline, trialTime, humanCount, playerAlive, botRunnerAlive);
+            if ((Trial)trialIndex == Trial.Rope) stage25D.ShowRopeRound(ropePhase, ropeSlots, humanCount, playerAlive, botRunnerAlive,riderOutAt);
+            if ((Trial)trialIndex == Trial.Final) stage25D.ShowFloor(floorRiders, tileDeadline, trialTime, humanCount, playerAlive, botRunnerAlive,riderOutAt);
             if ((Trial)trialIndex == Trial.Bridge) stage25D.ShowGlassFalls(bridgeFallAt, trialTime);
         }
         if(screen==Screen.Victory || screen==Screen.Ending) stage25D.ShowWinners(screen==Screen.Ending ? 9f : phaseTime,playerWon,humanCount);
@@ -182,12 +182,16 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         if (screen != Screen.Round) return;
 
         trialTime += dt;
+        if ((Trial)trialIndex == Trial.Cookie)
+        {
+            UpdateCookie(dt);
+            return;
+        }
         Keyboard keys = Keyboard.current;
         if (keys == null) return;
         switch ((Trial)trialIndex)
         {
             case Trial.RedLight: UpdateRedLight(keys, dt); break;
-            case Trial.Cookie: UpdateCookie(keys, dt); break;
             case Trial.Carousel: UpdateCarousel(keys, dt); break;
             case Trial.Night: UpdateNight(keys, dt); break;
             case Trial.Tug: UpdateTug(keys, dt); break;
@@ -438,15 +442,21 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         buttonStyle.hover.textColor=new Color(1,.86f,.52f);
     }
 
+    private static Vector2 UiOrigin(out float scale)
+    {
+        var screenSize = new Vector2(UnityEngine.Screen.width, UnityEngine.Screen.height);
+        scale = Mathf.Max(.001f, Mathf.Min(screenSize.x / 960f, screenSize.y / 540f));
+        return (screenSize - new Vector2(960f, 540f) * scale) * .5f;
+    }
+
     private void OnGUI()
     {
         if (pixel == null) return;
         if (titleStyle == null) SetupStyles();
-        uiScale = Mathf.Min(UnityEngine.Screen.width / 960f, UnityEngine.Screen.height / 540f);
-        float ox = (UnityEngine.Screen.width - 960f * uiScale) * 0.5f, oy = (UnityEngine.Screen.height - 540f * uiScale) * 0.5f;
+        Vector2 origin = UiOrigin(out uiScale);
         Matrix4x4 previousMatrix = GUI.matrix;
         Color previousBackgroundColor = GUI.backgroundColor;
-        GUI.matrix = Matrix4x4.TRS(new Vector3(ox, oy, 0f), Quaternion.identity, Vector3.one * uiScale);
+        GUI.matrix = Matrix4x4.TRS(origin, Quaternion.identity, Vector3.one * uiScale);
         GUI.backgroundColor = new Color(0.78f, 0.16f, 0.34f);
         if (screen == Screen.Title) DrawTitle();
         else if (screen == Screen.Kidnap) DrawKidnap();
@@ -558,7 +568,7 @@ public sealed partial class PixelSurvivalGame : MonoBehaviour
         if ((Trial)trialIndex != Trial.Cookie || ally < 0) Label(new Rect(170, 300, 620, 42), "Rivales restantes: " + RemainingRivals(), smallStyle);
         if ((Trial)trialIndex == Trial.Cookie && ally >= 0)
         {
-            Label(new Rect(150,290,660,58), $"Participante {ally+humanCount+1:00}: «Comparte tu ración y esta noche te cubro».", bodyStyle);
+            Label(new Rect(150,290,660,58), $"Participante {ally+humanCount+1:000}: «Comparte tu ración y esta noche te cubro».", bodyStyle);
             if (GUI.Button(new Rect(185,365,275,55),"COMPARTIR",buttonStyle))
             {
                 share = true;
